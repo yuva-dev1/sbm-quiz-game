@@ -9,7 +9,7 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
 }
 
 if (!getApps().length) {
-  initializeApp({ projectId: "bhagavatham-quiz-game" });
+  initializeApp({ projectId: "namabiksha-v1" });
 }
 
 export const db = getFirestore();

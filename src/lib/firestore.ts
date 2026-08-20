@@ -14,7 +14,7 @@ const globalForFirestore = globalThis as unknown as {
 // access outside a GCP-hosted environment, which this app doesn't do.
 const app =
   globalForFirestore.firebaseApp ??
-  (getApps()[0] ?? initializeApp({ projectId: "bhagavatham-quiz-game" }));
+  (getApps()[0] ?? initializeApp({ projectId: "namabiksha-v1" }));
 
 export const firestore = getFirestore(app);
 

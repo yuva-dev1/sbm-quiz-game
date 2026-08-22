@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { EditableQuestion } from "./EditableQuestion";
+import { AddQuestionForm } from "./AddQuestionForm";
 
 type DraftQuestion = {
   id: string;
@@ -229,6 +230,10 @@ export function QuizDraftCard({
               }
             />
           ))}
+          <AddQuestionForm
+            quizId={quiz.id}
+            onCreated={(created) => setQuestions((current) => [...current, created])}
+          />
         </ol>
       )}
 

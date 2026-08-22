@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { StartGameButton } from "./StartGameButton";
 import { EditableQuestion } from "./EditableQuestion";
+import { AddQuestionForm } from "./AddQuestionForm";
 
 type PublishedQuestion = {
   id: string;
@@ -93,6 +94,10 @@ export function PublishedQuizCard({
               onDeleted={() => setQuestions((current) => current.filter((q) => q.id !== question.id))}
             />
           ))}
+          <AddQuestionForm
+            quizId={quiz.id}
+            onCreated={(created) => setQuestions((current) => [...current, created])}
+          />
         </ol>
       )}
 

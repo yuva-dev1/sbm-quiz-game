@@ -14,8 +14,11 @@
  * retry (same model, shown its own bad output and, if the failure was low
  * faithfulness or a duplicate, told so) -> fallback model. The faithfulness
  * judge is always the *other* model from whichever one drafted the
- * candidate, so a model never grades its own output. A second pass
- * re-attempts only the slots still missing after the first full pass.
+ * candidate, so a model never grades its own output. Slots left empty (or
+ * knocked out by the cross-slot duplicate sweep) after a pass are re-run in
+ * a further pass, looping until every slot is filled or MAX_FILL_ROUNDS is
+ * hit — a single extra pass wasn't enough headroom to reliably reach the
+ * requested question count for smaller quizzes.
  * Restricted to multiple_choice/true_false — the only types the live tap
  * UI can render (see Answer model's comment in schema.prisma).
  *
@@ -92,6 +95,13 @@ const MAX_AVOID_ENTRIES_IN_PROMPT = 25;
 // this even if a host selects every week at once. This is a safety cap
 // against a much larger future corpus, not a normal-path limit.
 const MAX_SOURCE_TEXT_CHARS = 150_000;
+// Rounds of (re)generation attempted per slot before giving up on it —
+// covers both slots that produced nothing (all 3 attempts in generateSlot
+// failed) and slots knocked out by the cross-slot duplicate sweep. One
+// extra pass beyond the initial draft wasn't enough to reliably hit the
+// requested question count, especially for smaller quizzes where a single
+// dropped slot is a visible fraction of the total.
+const MAX_FILL_ROUNDS = 5;
 
 export type GeneratedQuestion = {
   id: string;
@@ -721,37 +731,30 @@ export async function generateQuiz(params: {
     await Promise.all(Array.from({ length: workerCount }, worker));
   }
 
-  completedCount = 0;
-  await runPass(
-    slots.map((_, i) => i),
-    "draft"
-  );
+  let indicesToFill = slots.map((_, i) => i);
+  for (let round = 0; indicesToFill.length > 0 && round < MAX_FILL_ROUNDS; round++) {
+    completedCount = params.questionCount - indicesToFill.length;
+    await runPass(indicesToFill, round === 0 ? "draft" : "repairing");
 
-  const missingIndices = slots.reduce<number[]>((acc, q, i) => (q === null ? [...acc, i] : acc), []);
-  if (missingIndices.length > 0) {
-    completedCount = params.questionCount - missingIndices.length;
-    await runPass(missingIndices, "repairing");
-  }
-
-  // Bounded concurrency means two slots can each pass their own duplicate
-  // check against the same not-yet-updated snapshot before either result is
-  // recorded, letting a duplicate through the per-slot ladder above. Sweep
-  // the finished slots in order and regenerate any later one that
-  // duplicates an earlier one, now against the complete set.
-  const acceptedSoFar: GeneratedQuestion[] = [...existingQuestions];
-  const duplicateIndices: number[] = [];
-  slots.forEach((question, index) => {
-    if (!question) return;
-    if (findDuplicate(question, acceptedSoFar)) {
-      duplicateIndices.push(index);
-    } else {
-      acceptedSoFar.push(question);
-    }
-  });
-  if (duplicateIndices.length > 0) {
+    // Bounded concurrency means two slots can each pass their own duplicate
+    // check against the same not-yet-updated snapshot before either result
+    // is recorded, letting a duplicate through the per-slot ladder inside
+    // generateSlot. Sweep the finished slots in order and null out any
+    // later one that duplicates an earlier one, now against the complete
+    // set, so it gets picked up by the next round's fill pass.
+    const acceptedSoFar: GeneratedQuestion[] = [...existingQuestions];
+    const duplicateIndices: number[] = [];
+    slots.forEach((question, index) => {
+      if (!question) return;
+      if (findDuplicate(question, acceptedSoFar)) {
+        duplicateIndices.push(index);
+      } else {
+        acceptedSoFar.push(question);
+      }
+    });
     for (const index of duplicateIndices) slots[index] = null;
-    completedCount = params.questionCount - duplicateIndices.length;
-    await runPass(duplicateIndices, "repairing");
+
+    indicesToFill = slots.reduce<number[]>((acc, q, i) => (q === null ? [...acc, i] : acc), []);
   }
 
   const questions = slots.filter((q): q is GeneratedQuestion => q !== null);

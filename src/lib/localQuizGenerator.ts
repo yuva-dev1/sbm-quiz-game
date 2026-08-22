@@ -696,15 +696,20 @@ export async function generateQuiz(params: {
   // Round-robin a shuffled topic order across slots (rather than handing
   // every call the same full topic list) so questions spread across the
   // material instead of the model gravitating to the same one or two facts
-  // repeatedly, especially for short true/false statements.
+  // repeatedly, especially for short true/false statements. Offsetting by
+  // `round` shifts a retried slot onto a *different* topic each round
+  // instead of retrying the same one — a slot whose assigned topic has run
+  // out of fresh, non-duplicate facts (easy to hit on a small course week
+  // once a few quizzes' worth of questions on it already exist) would
+  // otherwise retry that same exhausted topic every round and never fill.
   const shuffledTopics = [...params.topics].sort(() => Math.random() - 0.5);
-  const focusTopicFor = (slotIndex: number): string | null =>
-    shuffledTopics.length > 0 ? shuffledTopics[slotIndex % shuffledTopics.length] : null;
+  const focusTopicFor = (slotIndex: number, round: number): string | null =>
+    shuffledTopics.length > 0 ? shuffledTopics[(slotIndex + round) % shuffledTopics.length] : null;
 
   const slots: (GeneratedQuestion | null)[] = new Array(params.questionCount).fill(null);
   let completedCount = 0;
 
-  async function runPass(indices: number[], phase: GenerationProgress["phase"]) {
+  async function runPass(indices: number[], phase: GenerationProgress["phase"], round: number) {
     let cursor = 0;
     async function worker() {
       while (cursor < indices.length) {
@@ -715,7 +720,7 @@ export async function generateQuiz(params: {
         ];
         slots[slotIndex] = await generateSlot({
           topics: params.topics,
-          focusTopic: focusTopicFor(slotIndex),
+          focusTopic: focusTopicFor(slotIndex, round),
           coverageLabel: params.coverageLabel,
           difficulty: params.difficulty,
           avoidEntries,
@@ -731,10 +736,14 @@ export async function generateQuiz(params: {
     await Promise.all(Array.from({ length: workerCount }, worker));
   }
 
+  // At least one round per topic, so a stuck slot's rotation (above) gets a
+  // shot at every topic before this gives up on it, not just whichever
+  // number of topics the flat MAX_FILL_ROUNDS floor happens to cover.
+  const maxRounds = Math.max(MAX_FILL_ROUNDS, shuffledTopics.length);
   let indicesToFill = slots.map((_, i) => i);
-  for (let round = 0; indicesToFill.length > 0 && round < MAX_FILL_ROUNDS; round++) {
+  for (let round = 0; indicesToFill.length > 0 && round < maxRounds; round++) {
     completedCount = params.questionCount - indicesToFill.length;
-    await runPass(indicesToFill, round === 0 ? "draft" : "repairing");
+    await runPass(indicesToFill, round === 0 ? "draft" : "repairing", round);
 
     // Bounded concurrency means two slots can each pass their own duplicate
     // check against the same not-yet-updated snapshot before either result

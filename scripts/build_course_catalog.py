@@ -33,6 +33,7 @@ WEEK_LABELS = {
     "week-4": "Week 4",
     "week-5": "Week 5",
     "week-6": "Week 6",
+    "week-7": "Week 7",
 }
 
 HEADING_PATTERN = re.compile(r"^(\d+\.\d+)[ \t]+(.+?)[ \t]*$", re.MULTILINE)

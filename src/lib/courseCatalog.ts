@@ -49,6 +49,7 @@ const WEEK_SUMMARIES: Record<string, string> = {
   "week-4": "Structure & Lineage",
   "week-5": "Canto 1 Overview",
   "week-6": "Canto 1 Answers & Narada-Vyasa Dialogue",
+  "week-7": "King Parikshith's Lineage",
 };
 
 export async function getCourseCatalog(): Promise<CourseWeek[]> {

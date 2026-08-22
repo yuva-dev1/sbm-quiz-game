@@ -13,6 +13,7 @@ rebuilding the catalog.
 | 4 | `/s/Week-4-ENG-SB-Course-2-PDF.pdf` | `/s/SB-Week4-Infographics.jpeg` |
 | 5 | `/s/SBCC-E-5-Notes-PDF.pdf` | `/s/Week5-Infographics.jpeg` |
 | 6 | `/s/SBCC-E-6-Notes-PDF.pdf` | — (site currently reuses Week 5's infographic) |
+| 7 | `/s/SBCC-E-7-Notes-PDF.pdf` | `/s/Wk7-Infographics.jpeg` |
 
 All paths are relative to `https://www.srimadbhagavatamcourse.org`. As new
 weeks are posted, add a row here, download into a new `raw/week-N/`

@@ -175,6 +175,33 @@
           "topics_from_headings": []
         }
       ]
+    },
+    {
+      "id": "week-7",
+      "label": "Week 7",
+      "topics": [
+        "Ashwatthama's Revenge and Arjuna Sparing His Life",
+        "Kunti's Stuti After Krishna Protects the Unborn Parikshith",
+        "Bhishmacharya's Final Teachings and Bhishma Stuti",
+        "Parikshith's Birth, Horoscope, and Naming",
+        "Dhritarashtra, Gandhari, and Vidura's Departure to Saptasrota",
+        "Arjuna's Realization and the End of the Pandava Generation",
+        "Parikshith's Vision of Dharma as a Bull and Mother Earth as a Cow",
+        "The Four Legs of Dharma: Tapas, Shaucham, Daya, Satyam",
+        "Parikshith Sparing Kali Purusha and the Five Places of Kali"
+      ],
+      "source_documents": [
+        {
+          "id": "sbcc-e-7-notes-pdf",
+          "name": "SBCC E 7 Notes PDF.pdf",
+          "topics_from_headings": []
+        },
+        {
+          "id": "wk7-infographics",
+          "name": "Wk7 Infographics.jpeg",
+          "topics_from_headings": []
+        }
+      ]
     }
   ]
 }

@@ -18,15 +18,23 @@ export default function JoinPage() {
     setIsJoining(true);
     setError(null);
     try {
-      // Already joined this PIN this session (refreshed, went back, or
-      // reconnected after a dropped connection) — reuse the existing
-      // Player record instead of creating a duplicate (Story 7.1).
+      // Already joined this PIN on this device (refreshed, went back,
+      // reopened in a new tab, or reconnected after a dropped connection) —
+      // reuse the existing Player record instead of creating a duplicate
+      // (Story 7.1). Confirmed against the server first since a
+      // locally-stored id could point at a stale session if this PIN got
+      // reused later — falls through to a fresh join below if so.
       const existing = getPlayerSession(pin);
       if (existing) {
-        router.push(
-          `/play/${pin}?playerId=${existing.playerId}&nickname=${encodeURIComponent(existing.nickname)}`
-        );
-        return;
+        const stillValid = await fetch(`/api/players/${existing.playerId}?pin=${pin}`)
+          .then((res) => res.ok)
+          .catch(() => false);
+        if (stillValid) {
+          router.push(
+            `/play/${pin}?playerId=${existing.playerId}&nickname=${encodeURIComponent(existing.nickname)}`
+          );
+          return;
+        }
       }
 
       const response = await fetch("/api/players", {

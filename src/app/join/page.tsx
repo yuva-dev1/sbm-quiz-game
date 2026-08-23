@@ -10,6 +10,7 @@ export default function JoinPage() {
   const [nickname, setNickname] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isFull, setIsFull] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -32,6 +33,11 @@ export default function JoinPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin, nickname }),
       });
+      if (response.status === 409) {
+        setIsFull(true);
+        setIsJoining(false);
+        return;
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not join.");
       savePlayerSession(pin, { playerId: data.playerId, nickname: data.nickname });
@@ -40,6 +46,23 @@ export default function JoinPage() {
       setError(err instanceof Error ? err.message : "Could not join.");
       setIsJoining(false);
     }
+  }
+
+  if (isFull) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
+        <span className="text-6xl" aria-hidden>
+          😢
+        </span>
+        <div>
+          <h1 className="text-3xl">Max Players Reached!</h1>
+          <p className="mt-2 text-ink-soft">Sorry about that — this game is already full. Ask the host to start a new one.</p>
+        </div>
+        <button type="button" onClick={() => setIsFull(false)} className="btn btn-primary">
+          Try another PIN
+        </button>
+      </div>
+    );
   }
 
   return (

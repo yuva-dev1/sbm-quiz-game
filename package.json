@@ -12,7 +12,8 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "emulators:up": "firebase emulators:start --only firestore",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "ably": "^2.26.0",
@@ -28,6 +29,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.21.0",

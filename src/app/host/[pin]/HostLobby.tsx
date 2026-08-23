@@ -255,15 +255,22 @@ export function HostLobby({
 
   async function handleEndGame() {
     if (!window.confirm("End this game for everyone and show the final results?")) return;
+    await revealResults();
+  }
+
+  // Shared by the last-question "Reveal Results" button and the "End Game"
+  // early-termination button — both just finalize the session (see
+  // finalizeSession in src/lib/leaderboard.ts) via the same endpoint.
+  async function revealResults() {
     setIsEnding(true);
     setError(null);
     try {
       const response = await fetch(`/api/sessions/${pin}/end`, { method: "POST" });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not end the game.");
+      if (!response.ok) throw new Error(data.error ?? "Could not reveal the results.");
       if (data.podium) setPodium(data.podium);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not end the game.");
+      setError(err instanceof Error ? err.message : "Could not reveal the results.");
     } finally {
       setIsEnding(false);
     }
@@ -470,9 +477,15 @@ export function HostLobby({
         )}
 
         {locked ? (
-          <button type="button" onClick={handleNext} disabled={isAdvancing || isLastQuestion} className="btn btn-primary">
-            {isLastQuestion ? "Ending game…" : isAdvancing ? "Loading…" : "Next Question"}
-          </button>
+          isLastQuestion ? (
+            <button type="button" onClick={revealResults} disabled={isEnding} className="btn btn-primary">
+              {isEnding ? "Revealing…" : "Reveal Results"}
+            </button>
+          ) : (
+            <button type="button" onClick={handleNext} disabled={isAdvancing} className="btn btn-primary">
+              {isAdvancing ? "Loading…" : "Next Question"}
+            </button>
+          )
         ) : (
           <button type="button" onClick={handleLock} className="btn btn-secondary">
             Lock Now

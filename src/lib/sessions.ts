@@ -178,6 +178,25 @@ export async function endGameSession(pin: string) {
 }
 
 /**
+ * Force-ends every still-running (LOBBY/ACTIVE) session for a quiz — the
+ * host's "Kill all live sessions" action, used to clear the way for deleting
+ * a published quiz that has games in progress (the DELETE route blocks while
+ * any non-COMPLETED session for the quiz exists). Reuses the same finalize
+ * path a normal end-of-game takes, so any players still connected land on a
+ * normal podium screen instead of being left stuck. Returns how many
+ * sessions were killed.
+ */
+export async function killLiveSessionsForQuiz(quizId: string): Promise<number> {
+  const liveSnap = await firestore
+    .collection("gameSessions")
+    .where("quizId", "==", quizId)
+    .where("status", "in", ["LOBBY", "ACTIVE"])
+    .get();
+  await Promise.all(liveSnap.docs.map((doc) => finalizeSession(doc.data().pin as string)));
+  return liveSnap.docs.length;
+}
+
+/**
  * Live mid-game override for the leaderboard/timer visibility toggles the
  * host sees on the question screen — separate from the Quiz's authoring-time
  * defaults, so flipping this never rewrites the quiz itself.

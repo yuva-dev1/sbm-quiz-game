@@ -23,6 +23,8 @@ export function PublishedQuizCard({
 }) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUnpublishing, setIsUnpublishing] = useState(false);
+  const [isKillingSessions, setIsKillingSessions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   // Lifted out of EditableQuestion so a saved edit survives collapsing and
@@ -47,6 +49,45 @@ export function PublishedQuizCard({
     }
   }
 
+  async function handleUnpublish() {
+    setIsUnpublishing(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/quizzes/${quiz.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unpublish: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not unpublish this quiz.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not unpublish this quiz.");
+      setIsUnpublishing(false);
+    }
+  }
+
+  async function handleKillSessions() {
+    if (
+      !window.confirm(
+        `End all live sessions of "${quiz.title}"? Anyone still playing will be moved to the final results screen.`
+      )
+    )
+      return;
+    setIsKillingSessions(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/quizzes/${quiz.id}/kill-sessions`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not end this quiz's live sessions.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not end this quiz's live sessions.");
+    } finally {
+      setIsKillingSessions(false);
+    }
+  }
+
   return (
     <li className="card flex flex-col gap-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -57,7 +98,18 @@ export function PublishedQuizCard({
             {questions.length === 1 ? "" : "s"}
           </p>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+          <button type="button" onClick={handleUnpublish} disabled={isUnpublishing} className="btn btn-secondary">
+            {isUnpublishing ? "Unpublishing…" : "Unpublish"}
+          </button>
+          <button
+            type="button"
+            onClick={handleKillSessions}
+            disabled={isKillingSessions}
+            className="btn btn-secondary text-danger"
+          >
+            {isKillingSessions ? "Ending sessions…" : "Kill all live sessions"}
+          </button>
           <button
             type="button"
             onClick={handleDelete}

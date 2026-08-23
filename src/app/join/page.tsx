@@ -11,6 +11,7 @@ export default function JoinPage() {
   const [isJoining, setIsJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isFull, setIsFull] = useState(false);
+  const [isNoSession, setIsNoSession] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -38,6 +39,11 @@ export default function JoinPage() {
         setIsJoining(false);
         return;
       }
+      if (response.status === 404) {
+        setIsNoSession(true);
+        setIsJoining(false);
+        return;
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not join.");
       savePlayerSession(pin, { playerId: data.playerId, nickname: data.nickname });
@@ -59,6 +65,23 @@ export default function JoinPage() {
           <p className="mt-2 text-ink-soft">Sorry about that — this game is already full. Ask the host to start a new one.</p>
         </div>
         <button type="button" onClick={() => setIsFull(false)} className="btn btn-primary">
+          Try another PIN
+        </button>
+      </div>
+    );
+  }
+
+  if (isNoSession) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
+        <span className="text-6xl" aria-hidden>
+          🕰️
+        </span>
+        <div>
+          <h1 className="text-3xl">No session currently active!</h1>
+          <p className="mt-2 text-ink-soft">Please try again later.</p>
+        </div>
+        <button type="button" onClick={() => setIsNoSession(false)} className="btn btn-primary">
           Try another PIN
         </button>
       </div>

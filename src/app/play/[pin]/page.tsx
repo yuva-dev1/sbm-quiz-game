@@ -7,6 +7,15 @@ import type { LeaderboardEntry, QuestionStartPayload } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
+// Plain (non-component) helper so this request-time Date.now() read doesn't
+// trip the "impure call during render" lint rule, which scans component
+// bodies — decided once per request, passed down as a literal prop, rather
+// than re-derived from Date.now() again during the client's own render/
+// hydration (see PlayerLobby's optionsVisible comment for why that races).
+function computeInitialOptionsVisible(locked: boolean, optionsRevealedAt: Date | null): boolean {
+  return locked || (optionsRevealedAt !== null && optionsRevealedAt.getTime() <= Date.now());
+}
+
 export default async function PlayPage({
   params,
   searchParams,
@@ -64,12 +73,14 @@ export default async function PlayPage({
   let initialLocked = false;
   let initialMyChoices: number[] = [];
   let initialRevealedAnswers: string[] | null = null;
+  let initialOptionsVisible = false;
   if (session.status === "ACTIVE" && current) {
     initialQuestion = toPublicQuestion(current);
     initialLocked = Boolean(current.lockedAt);
     initialRevealedAnswers = initialLocked ? current.correctChoices : null;
     const myAnswerSnap = await current.ref.collection("answers").doc(playerId).get();
     initialMyChoices = (myAnswerSnap.data()?.choiceIndices as number[] | undefined) ?? [];
+    initialOptionsVisible = computeInitialOptionsVisible(initialLocked, current.optionsRevealedAt);
   }
 
   const initialPodium: LeaderboardEntry[] | null =
@@ -84,21 +95,20 @@ export default async function PlayPage({
           };
         })
       : null;
-  const initialTotalPlayers =
-    session.status === "COMPLETED" ? (await sessionRef.collection("results").count().get()).data().count : 0;
 
   return (
     <PlayerLobby
       pin={pin}
       playerId={playerId}
       nickname={nickname}
+      questionCount={questions.length}
       initialGameStarted={session.status === "ACTIVE"}
       initialPodium={initialPodium}
-      initialTotalPlayers={initialTotalPlayers}
       initialQuestion={initialQuestion}
       initialLocked={initialLocked}
       initialMyChoices={initialMyChoices}
       initialRevealedAnswers={initialRevealedAnswers}
+      initialOptionsVisible={initialOptionsVisible}
       initialShowLeaderboard={session.showLeaderboard as boolean}
       initialShowTimer={session.showTimer as boolean}
     />

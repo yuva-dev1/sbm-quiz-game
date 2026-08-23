@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createSessionRealtimeClient } from "@/lib/ably-client";
 import {
   SessionEvent,
+  type AnswerBreakdownPayload,
   type LeaderboardEntry,
   type LeaderboardUpdatePayload,
   type PodiumPayload,
@@ -25,46 +26,32 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 
 type MyRank = { rank: number; points: number; totalPlayers: number; correctCount: number; answeredCount: number };
 
-/** "1st"/"2nd"/"3rd"/"4th" suffix for a percentile display. */
-function ordinalSuffix(n: number): string {
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 13) return "th";
-  switch (n % 10) {
-    case 1:
-      return "st";
-    case 2:
-      return "nd";
-    case 3:
-      return "rd";
-    default:
-      return "th";
-  }
-}
-
 export function PlayerLobby({
   pin,
   playerId,
   nickname,
+  questionCount,
   initialGameStarted,
   initialPodium,
-  initialTotalPlayers,
   initialQuestion,
   initialLocked,
   initialMyChoices,
   initialRevealedAnswers,
+  initialOptionsVisible,
   initialShowLeaderboard,
   initialShowTimer,
 }: {
   pin: string;
   playerId: string;
   nickname: string;
+  questionCount: number;
   initialGameStarted: boolean;
   initialPodium: LeaderboardEntry[] | null;
-  initialTotalPlayers: number;
   initialQuestion: QuestionStartPayload | null;
   initialLocked: boolean;
   initialMyChoices: number[];
   initialRevealedAnswers: string[] | null;
+  initialOptionsVisible: boolean;
   initialShowLeaderboard: boolean;
   initialShowTimer: boolean;
 }) {
@@ -80,10 +67,18 @@ export function PlayerLobby({
   const [myRank, setMyRank] = useState<MyRank | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
-  const [totalPlayers, setTotalPlayers] = useState(initialTotalPlayers);
   const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
   const [showTimer, setShowTimer] = useState(initialShowTimer);
   const [activeQuote, setActiveQuote] = useState<QuoteDisplayPayload | null>(null);
+  const [answerBreakdown, setAnswerBreakdown] = useState<AnswerBreakdownPayload | null>(null);
+  // Whether the choice grid should actually be visible. Deliberately NOT
+  // derived inline from Date.now() during render — that raced between the
+  // server's render-time snapshot and the client's later hydration-time
+  // snapshot and could let the grid flash visible for a frame before
+  // settling back to hidden. Instead this is seeded from a value the server
+  // computed once (initialOptionsVisible) and from then on is only ever
+  // flipped by the effect below, which runs client-side post-commit.
+  const [optionsVisible, setOptionsVisible] = useState(initialOptionsVisible);
 
   const isMultiSelect = question?.type === "MULTI_SELECT";
 
@@ -92,9 +87,23 @@ export function PlayerLobby({
       ? (question.optionsRevealedAt - question.startedAt) / 1000
       : 0;
   const leadRemaining = useCountdown(question?.startedAt ?? null, leadDurationSecs);
-  const optionsVisible = question !== null && leadRemaining <= 0;
 
   const remaining = useCountdown(question?.optionsRevealedAt ?? null, question?.timeLimitSecs ?? 0);
+
+  // Schedules the exact client-side moment the grid becomes visible, rather
+  // than polling Date.now() on every render (see optionsVisible's comment
+  // above). Reacts to the question itself so every new question_start
+  // re-schedules against its own optionsRevealedAt. The hide side of this
+  // (a new question arriving) is handled synchronously in onQuestionStart
+  // below, not here — this effect only ever needs to schedule the reveal,
+  // always via the setTimeout callback rather than a direct call, even for
+  // an already-elapsed lead time (delay clamped to 0).
+  useEffect(() => {
+    if (!question || question.optionsRevealedAt === null) return;
+    const msUntilReveal = question.optionsRevealedAt - Date.now();
+    const timer = setTimeout(() => setOptionsVisible(true), Math.max(0, msUntilReveal));
+    return () => clearTimeout(timer);
+  }, [question]);
 
   // Keep sessionStorage in sync even when this page was reached directly
   // (a shared link, a bookmark) rather than through /join, so a later
@@ -103,6 +112,21 @@ export function PlayerLobby({
   useEffect(() => {
     savePlayerSession(pin, { playerId, nickname });
   }, [pin, playerId, nickname]);
+
+  // Back/forward navigation during a live game (accidental swipe-back,
+  // trackpad gesture) can land on a stale bfcache'd render of this screen —
+  // force a full reload instead so state always comes fresh from the server.
+  useEffect(() => {
+    function handlePopState() {
+      window.location.reload();
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // Synchronous re-entrancy guard for submitChoices — see its own comment
+  // for why a React-state-based check alone isn't quite enough.
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     const client = createSessionRealtimeClient(pin, playerId);
@@ -118,6 +142,11 @@ export function PlayerLobby({
       setMyRank(null);
       setLeaderboard(null);
       setActiveQuote(null);
+      setAnswerBreakdown(null);
+      // Hide immediately (same commit as the new question) — the effect
+      // above only handles scheduling the eventual reveal, not this reset.
+      setOptionsVisible(false);
+      submittingRef.current = false;
     };
     const onQuoteDisplay = (message: InboundMessage) => {
       setActiveQuote(message.data as QuoteDisplayPayload);
@@ -133,12 +162,14 @@ export function PlayerLobby({
     const onPodium = (message: InboundMessage) => {
       const data = message.data as PodiumPayload;
       setPodium(data.podium);
-      setTotalPlayers(data.totalPlayers);
     };
     const onSettingsUpdate = (message: InboundMessage) => {
       const data = message.data as SettingsUpdatePayload;
       setShowLeaderboard(data.showLeaderboard);
       setShowTimer(data.showTimer);
+    };
+    const onAnswerBreakdown = (message: InboundMessage) => {
+      setAnswerBreakdown(message.data as AnswerBreakdownPayload);
     };
 
     channel.subscribe(SessionEvent.GameStarted, onGameStarted);
@@ -148,6 +179,7 @@ export function PlayerLobby({
     channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
     channel.subscribe(SessionEvent.Podium, onPodium);
     channel.subscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
+    channel.subscribe(SessionEvent.AnswerBreakdown, onAnswerBreakdown);
 
     return () => {
       channel.unsubscribe(SessionEvent.GameStarted, onGameStarted);
@@ -157,6 +189,7 @@ export function PlayerLobby({
       channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
       channel.unsubscribe(SessionEvent.Podium, onPodium);
       channel.unsubscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
+      channel.unsubscribe(SessionEvent.AnswerBreakdown, onAnswerBreakdown);
       client.close();
     };
   }, [pin, playerId]);
@@ -167,7 +200,9 @@ export function PlayerLobby({
 
   // Story 5.2: fetch our own rank once a question locks — a plain
   // authenticated GET is as private as this needs to be (see the rank
-  // route's own comment for why this beats a per-player Ably channel).
+  // route's own comment for why this beats a per-player Ably channel). This
+  // still backs the mid-question "Your rank" line further down — it's a
+  // separate feature from the end-of-game screen, which no longer shows rank.
   useEffect(() => {
     if (!locked) return;
     let cancelled = false;
@@ -204,7 +239,14 @@ export function PlayerLobby({
   }, [playerId]);
 
   async function submitChoices(indices: number[]) {
-    if (myChoices.length > 0 || locked || !question || !optionsVisible || indices.length === 0) return;
+    // submittingRef is checked-and-set synchronously, before any state
+    // reads/updates, so two taps landing before a re-render commits the
+    // disabled state to the DOM (a fast double-tap, a stray duplicate
+    // event) can't both slip past the myChoices-based guard below.
+    if (submittingRef.current || myChoices.length > 0 || locked || !question || !optionsVisible || indices.length === 0) {
+      return;
+    }
+    submittingRef.current = true;
     setMyChoices(indices);
     setSubmitError(null);
     try {
@@ -238,52 +280,12 @@ export function PlayerLobby({
   }
 
   if (podium) {
-    const mine = podium.find((entry) => entry.playerId === playerId);
-    const rank = mine?.rank ?? myRank?.rank;
-    const points = mine?.points ?? myRank?.points;
-    const total = myRank?.totalPlayers || totalPlayers;
-    // Standard percentile-rank convention — higher is better, 100th
-    // percentile is the top score — rather than a "Top X%" framing, where a
-    // lone/best player would confusingly read as "Top 100%".
-    const percentile =
-      rank !== undefined && total > 0
-        ? total === 1
-          ? 100
-          : Math.round(((total - rank) / (total - 1)) * 100)
-        : null;
-    const scorePct =
-      myRank && myRank.answeredCount > 0 ? Math.round((myRank.correctCount / myRank.answeredCount) * 100) : null;
-
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
         <Confetti />
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <h1 className="text-4xl">Game Over</h1>
-        {scorePct !== null && (
-          <p className="pill-badge">
-            {myRank!.correctCount}/{myRank!.answeredCount} correct &middot; {scorePct}%
-          </p>
-        )}
-        {rank !== undefined && (
-          <div className="card flex flex-col items-center gap-2 px-10 py-8">
-            {showLeaderboard ? (
-              <>
-                <span className="text-4xl">{MEDALS[rank - 1] ?? `#${rank}`}</span>
-                <p className="font-serif text-2xl text-brand-ink">You placed #{rank}</p>
-              </>
-            ) : (
-              // Leaderboard was off for the last question — standings (and
-              // exact point totals, which would let players back into a
-              // ranking anyway) stay private; show a percentile instead
-              // (Story: percentile when leaderboard is off).
-              <p className="font-serif text-2xl text-brand-ink">
-                {percentile}
-                {ordinalSuffix(percentile!)} percentile
-              </p>
-            )}
-            {showLeaderboard && <p className="font-serif text-3xl font-bold text-brand">{points} pts</p>}
-          </div>
-        )}
+        <p className="font-serif text-2xl text-brand-ink">Thank you for playing! Radhe Radhe!</p>
       </div>
     );
   }
@@ -295,37 +297,65 @@ export function PlayerLobby({
     const isFullyCorrect =
       revealedAnswers !== null && correctPicks === revealedAnswers.length && myChoices.length === revealedAnswers.length;
 
+    const postRevealStatus =
+      myChoices.length > 0 && submitError ? (
+        <p className="pill-badge">{submitError}</p>
+      ) : myChoices.length > 0 && locked && revealedAnswers !== null ? (
+        isFullyCorrect ? (
+          <p className="pill-badge bg-success-soft text-success">Correct! ✓</p>
+        ) : correctPicks > 0 ? (
+          <p className="pill-badge bg-success-soft text-success">
+            {correctPicks}/{revealedAnswers.length} correct
+          </p>
+        ) : (
+          <p className="pill-badge bg-danger-soft text-danger">Incorrect ✗</p>
+        )
+      ) : myChoices.length > 0 ? (
+        <p className="pill-badge">Answer locked in!</p>
+      ) : locked ? (
+        <p className="pill-badge">{showTimer ? "Time's up!" : "Locked!"}</p>
+      ) : isMultiSelect ? (
+        <p className="pill-badge">Select all that apply</p>
+      ) : (
+        <p className="pill-badge">Tap your answer</p>
+      );
+
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
-        {showTimer && optionsVisible && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
+        <span className="pill-badge">
+          Question {question.questionIndex + 1} of {questionCount}
+        </span>
+        {/* Always mounted whenever the timer is on at all (toggled invisible,
+            not unmounted) so its line always reserves the same vertical
+            space — otherwise it pops in the instant options reveal and
+            shifts everything below it. */}
+        {showTimer && (
+          <p
+            className={`font-serif text-5xl font-bold text-brand ${optionsVisible ? "" : "invisible"}`}
+            aria-hidden={!optionsVisible}
+          >
+            {remaining}
+          </p>
+        )}
         <h1 className="max-w-md text-2xl break-words lg:max-w-xl">{question.question}</h1>
-        {!optionsVisible ? (
-          <div className="flex flex-col items-center gap-2">
+        {/* Both the "Get Ready" countdown and the post-reveal status pill are
+            always mounted, stacked in the same grid cell, and toggled via
+            visibility — never conditionally mounted — so the cell's height
+            (the taller of the two) never changes across the reveal
+            transition and the question above never re-centers. */}
+        <div className="grid place-items-center">
+          <div
+            className={`col-start-1 row-start-1 flex flex-col items-center gap-2 ${optionsVisible ? "invisible" : ""}`}
+            aria-hidden={optionsVisible}
+          >
             <p className="text-xs font-bold tracking-wide text-ink-soft uppercase">Get Ready</p>
             <p className="font-serif text-7xl font-bold text-brand">{leadRemaining}</p>
           </div>
-        ) : myChoices.length > 0 && submitError ? (
-          <p className="pill-badge">{submitError}</p>
-        ) : myChoices.length > 0 && locked && revealedAnswers !== null ? (
-          isFullyCorrect ? (
-            <p className="pill-badge bg-success-soft text-success">Correct! ✓</p>
-          ) : correctPicks > 0 ? (
-            <p className="pill-badge bg-success-soft text-success">
-              {correctPicks}/{revealedAnswers.length} correct
-            </p>
-          ) : (
-            <p className="pill-badge bg-danger-soft text-danger">Incorrect ✗</p>
-          )
-        ) : myChoices.length > 0 ? (
-          <p className="pill-badge">Answer locked in!</p>
-        ) : locked ? (
-          <p className="pill-badge">{showTimer ? "Time's up!" : "Locked!"}</p>
-        ) : isMultiSelect ? (
-          <p className="pill-badge">Select all that apply</p>
-        ) : (
-          <p className="pill-badge">Tap your answer</p>
-        )}
+          <div className={`col-start-1 row-start-1 ${optionsVisible ? "" : "invisible"}`} aria-hidden={!optionsVisible}>
+            {postRevealStatus}
+          </div>
+        </div>
         {/* Always mounted at full size (even before options reveal) and just
             toggled invisible, rather than conditionally mounted — so reveal
             never changes this screen's total height and re-triggers the
@@ -355,21 +385,20 @@ export function PlayerLobby({
               : disabled && !mySelected
                 ? "opacity-40"
                 : "";
-            const ringClass = isCorrectChoice
-              ? "ring-4 ring-success"
-              : isMyWrongPick
-                ? "ring-4 ring-danger"
-                : mySelected && !isRevealed
-                  ? "ring-4 ring-white"
-                  : "";
+            // Neutral (never red/green) pre-lock "you tapped this" affordance.
+            const selectedPreLockClass = mySelected && !isRevealed ? "ring-4 ring-white scale-105" : "";
+            // Green/red are reserved for exactly this moment — the answer
+            // reveal — and nowhere else on this screen. A solid fill of the
+            // whole tile, not just a ring, per QA feedback.
+            const revealFillClass = isCorrectChoice ? "bg-success" : isMyWrongPick ? "bg-danger" : "";
             return (
               <button
                 key={index}
                 type="button"
                 disabled={disabled}
                 onClick={() => handleTileClick(index)}
-                className={`flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${dimClass} ${ringClass}`}
-                style={{ backgroundColor: ANSWER_TILE_COLORS[index % ANSWER_TILE_COLORS.length] }}
+                className={`flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${dimClass} ${selectedPreLockClass} ${revealFillClass}`}
+                style={revealFillClass ? undefined : { backgroundColor: ANSWER_TILE_COLORS[index % ANSWER_TILE_COLORS.length] }}
                 aria-label={`Option ${index + 1}: ${choice}`}
                 aria-pressed={isMultiSelect ? mySelected : undefined}
               >
@@ -389,6 +418,40 @@ export function PlayerLobby({
           >
             Submit Answer
           </button>
+        )}
+        {locked && answerBreakdown && (answerBreakdown.correctCount > 0 || answerBreakdown.incorrectCount > 0) && (
+          <div className="w-full max-w-sm lg:max-w-md">
+            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Correct vs Incorrect</p>
+            {(() => {
+              const total = answerBreakdown.correctCount + answerBreakdown.incorrectCount;
+              const correctPct = Math.round((answerBreakdown.correctCount / total) * 100);
+              const incorrectPct = 100 - correctPct;
+              return (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-20 shrink-0 text-left text-sm font-semibold text-success">Correct</span>
+                    <div className="h-6 flex-1 overflow-hidden rounded-full bg-paper-deep">
+                      <div
+                        className="h-full rounded-full bg-success transition-all duration-500"
+                        style={{ width: `${correctPct}%` }}
+                      />
+                    </div>
+                    <span className="w-8 shrink-0 text-right text-sm font-semibold">{answerBreakdown.correctCount}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-20 shrink-0 text-left text-sm font-semibold text-danger">Incorrect</span>
+                    <div className="h-6 flex-1 overflow-hidden rounded-full bg-paper-deep">
+                      <div
+                        className="h-full rounded-full bg-danger transition-all duration-500"
+                        style={{ width: `${incorrectPct}%` }}
+                      />
+                    </div>
+                    <span className="w-8 shrink-0 text-right text-sm font-semibold">{answerBreakdown.incorrectCount}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         )}
         {showLeaderboard && locked && leaderboard && (
           <div className="w-full max-w-sm lg:max-w-md">

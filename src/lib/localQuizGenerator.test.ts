@@ -25,6 +25,12 @@ function isAnswerabilityCheck(messages: ChatMessage[]): boolean {
   return (messages.find((m) => m.role === "user")?.content ?? "").includes("Marked correct answer:");
 }
 
+// Same pattern as isAnswerabilityCheck — checkDifficultyMatch() also reuses
+// completeChat, distinguished by the one phrase only its own prompt contains.
+function isDifficultyCheck(messages: ChatMessage[]): boolean {
+  return (messages.find((m) => m.role === "user")?.content ?? "").includes("Target difficulty tier:");
+}
+
 // Each call cycles through genuinely distinct facts (not just a numeric
 // suffix — normalizeWords drops words of length <= 3, including bare
 // digits, so e.g. "chapter 1" vs "chapter 2" would normalize to identical
@@ -59,6 +65,9 @@ function validDraftFor(messages: ChatMessage[]): string {
   // a draftCounter tick and throw off which fact each real draft call gets.
   if (isAnswerabilityCheck(messages)) {
     return JSON.stringify({ answerable: true, reason: "fine" });
+  }
+  if (isDifficultyCheck(messages)) {
+    return JSON.stringify({ matches: true, reason: "fine" });
   }
   const index = draftCounter++ % MULTIPLE_CHOICE_FACTS.length;
   // Verbatim within the one grounded sourceText any of these tests use (see
@@ -429,11 +438,17 @@ describe("generateQuiz", () => {
     // existingQuestions list, so a draft that only duplicates something
     // from existingQuestions (never generated in this run) should still be
     // caught on every attempt and the slot dropped.
+    // questionCount: 1 is always assigned multiple_choice (see
+    // assignQuestionTypes — a 1-question quiz rounds its true_false quota
+    // down to 0), so the mocked draft and existingQuestions entry below are
+    // both multiple_choice to actually exercise the duplicate path rather
+    // than accidentally failing on a type mismatch instead.
     completeChatMock.mockImplementation(async () =>
       JSON.stringify({
-        type: "true_false",
-        question: "Krishna appears in Canto 1?",
-        answer: "True",
+        type: "multiple_choice",
+        question: "Who does Krishna appear as in Canto 1?",
+        choices: ["Himself", "Vyasa", "Narada", "Suta"],
+        answer: "Himself",
         explanation: "Because.",
         core_fact: "Krishna's appearance in Canto 1",
       })
@@ -450,16 +465,82 @@ describe("generateQuiz", () => {
         existingQuestions: [
           {
             id: "existing-1",
-            type: "true_false",
-            question: "Krishna appears in Canto 1?",
-            choices: ["True", "False"],
-            answer: "True",
+            type: "multiple_choice",
+            question: "Who does Krishna appear as in Canto 1?",
+            choices: ["Himself", "Vyasa", "Narada", "Suta"],
+            answer: "Himself",
             explanation: "",
             coreFact: "",
             sourceExcerpt: null,
             timeLimitSecs: 20,
           },
         ],
+      })
+    ).rejects.toThrow(QuizGenerationError);
+  });
+
+  it("holds the true/false share to an exact per-quiz quota instead of a per-slot coin flip", async () => {
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    // questionCount: 5 so the 4 multiple_choice + 1 true_false slots it needs
+    // stay within MULTIPLE_CHOICE_FACTS/TRUE_FALSE_FACTS' 5 distinct facts
+    // each — a larger count would need to cycle back through the same facts
+    // and start tripping findDuplicate, which isn't what this test is about.
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 5,
+      difficulty: "mixed",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(5);
+    const trueFalseCount = quiz.questions.filter((q) => q.type === "true_false").length;
+    // TRUE_FALSE_RATIO is 0.2 — for 5 questions that's an exact quota of 1,
+    // not a probabilistic average, so this should hold on every run.
+    expect(trueFalseCount).toBe(1);
+  });
+
+  it("rejects a draft that fails the difficulty-conformance judge and recovers once it matches", async () => {
+    let difficultyCalls = 0;
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      if (isDifficultyCheck(messages)) {
+        difficultyCalls++;
+        return JSON.stringify({ matches: difficultyCalls > 1, reason: "test" });
+      }
+      return validDraftFor(messages);
+    });
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 1,
+      difficulty: "beginner",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+    expect(difficultyCalls).toBeGreaterThan(1);
+  });
+
+  it("drops a slot whose difficulty-conformance check never passes", async () => {
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      if (isDifficultyCheck(messages)) {
+        return JSON.stringify({ matches: false, reason: "never matches" });
+      }
+      return validDraftFor(messages);
+    });
+
+    const { generateQuiz, QuizGenerationError } = await import("@/lib/localQuizGenerator");
+    await expect(
+      generateQuiz({
+        topics: ["Sanatana Dharma"],
+        sourceText: "",
+        questionCount: 1,
+        difficulty: "advanced",
+        coverageLabel: "Week 1",
       })
     ).rejects.toThrow(QuizGenerationError);
   });

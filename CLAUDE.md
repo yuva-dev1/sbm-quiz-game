@@ -12,9 +12,13 @@ Always create a feature branch off `main` and open a PR for it rather than commi
 
 ## Deployment
 
-Always deploy from main
+Always deploy from main — pushing to `main` triggers an automatic Cloud Build deploy; there is no
+manual `gcloud` deploy step.
 
-Use gcloud bhagavatham-quiz-game project to always deploy.
+Firebase deployments (e.g. `firebase deploy --only firestore:indexes`) must be run authenticated as
+the `yuvadev1@godivinity.org` account, not the legacy `wise.ani@gmail.com` account. Check the active
+account with `firebase login:list` before deploying, and switch with `firebase login --reauth` if
+it's on the wrong one.
 
 ## What this is
 

@@ -14,6 +14,7 @@ type QuizQuestion = {
   choices: string[];
   correctChoices: string[];
   timeLimitSecs: number;
+  sourceExcerpt: string | null;
 };
 
 async function withQuestions(doc: FirebaseFirestore.QueryDocumentSnapshot) {
@@ -27,6 +28,7 @@ async function withQuestions(doc: FirebaseFirestore.QueryDocumentSnapshot) {
       choices: data.choices,
       correctChoices: data.correctChoices,
       timeLimitSecs: data.timeLimitSecs,
+      sourceExcerpt: (data.sourceExcerpt as string | null | undefined) ?? null,
     };
   });
   return { data: doc.data(), questions };

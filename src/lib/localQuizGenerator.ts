@@ -121,6 +121,15 @@ export type GeneratedQuestion = {
    * catches that, where word-overlap on the question/explanation text alone
    * doesn't reliably. */
   coreFact: string;
+  /** A short phrase or sentence self-reported by the model as copied
+   * verbatim from the course-note excerpt it was shown — mechanically
+   * checked against that excerpt (see attemptDraft's excerpt_not_verbatim
+   * check) before the question is ever accepted, so this is a real citation
+   * a host can Ctrl+F for in the source notes, not just an LLM claim. Null
+   * for ungrounded generation (no source text was available to quote from).
+   * Persisted to the saved quiz so the host's draft/published question
+   * preview can show it. */
+  sourceExcerpt: string | null;
   /** Per-question countdown, derived from a word-count-based complexity score
    * (see computeTimeLimitSecs) rather than one flat default for every
    * question — a longer stem plus four choices needs more reading time than
@@ -150,7 +159,14 @@ export class QuizGenerationError extends Error {
 type Difficulty = "beginner" | "intermediate" | "advanced" | "mixed";
 type EffectiveDifficulty = "beginner" | "intermediate" | "advanced";
 type QuestionType = "multiple_choice" | "true_false";
-type FailureReason = "invalid_json" | "low_faithfulness" | "duplicate" | "ambiguous" | "not_verbatim" | "choice_too_long";
+type FailureReason =
+  | "invalid_json"
+  | "low_faithfulness"
+  | "duplicate"
+  | "ambiguous"
+  | "not_verbatim"
+  | "choice_too_long"
+  | "excerpt_not_verbatim";
 
 const DIFFICULTY_GUIDANCE: Record<EffectiveDifficulty, string> = {
   beginner:
@@ -386,11 +402,23 @@ function buildUserPrompt(params: {
       "scripture\") — not a copy of the question or answer text, just a terse label for the underlying fact, " +
       "so it can be checked against the core_fact of already-used questions above."
   );
+  const grounded = params.sourceText.trim().length > 0;
+  if (grounded) {
+    lines.push(
+      "Also include \"source_excerpt\": a short phrase or sentence (roughly 6-25 words) copied verbatim, " +
+        "word-for-word, straight from the course-note excerpt above — the exact text that most directly " +
+        "supports this question's answer. Quote a single contiguous run of text exactly as written there; do " +
+        "not paraphrase or splice together separate sentences. This is what lets a host verify the question " +
+        "against the source material later, so it must be real, checkable text, not a summary."
+    );
+  }
   lines.push("Return JSON matching exactly this shape:");
+  const shapeTail = grounded ? ',"source_excerpt":"..."}' : "}";
   lines.push(
     params.type === "multiple_choice"
-      ? '{"type":"multiple_choice","question":"...","choices":["...","...","...","..."],"answer":"<one of the four choices, verbatim>","explanation":"...","core_fact":"..."}'
-      : '{"type":"true_false","question":"...","answer":"True" or "False","explanation":"...","core_fact":"..."}'
+      ? '{"type":"multiple_choice","question":"...","choices":["...","...","...","..."],"answer":"<one of the four choices, verbatim>","explanation":"...","core_fact":"..."' +
+          shapeTail
+      : '{"type":"true_false","question":"...","answer":"True" or "False","explanation":"...","core_fact":"..."' + shapeTail
   );
   if (params.type === "multiple_choice") {
     lines.push(
@@ -424,6 +452,9 @@ const MultipleChoiceDraftSchema = z
     answer: z.string().trim().min(1),
     explanation: z.string().trim().min(1),
     core_fact: z.string().trim().min(1),
+    // Absent for ungrounded generation (no source text to quote from) —
+    // only required/checked when grounded, see attemptDraft.
+    source_excerpt: z.string().trim().min(1).optional(),
   })
   .refine((draft) => draft.choices.includes(draft.answer), {
     message: "answer must match one of the choices exactly",
@@ -435,6 +466,7 @@ const TrueFalseDraftSchema = z.object({
   answer: z.enum(["True", "False"]),
   explanation: z.string().trim().min(1),
   core_fact: z.string().trim().min(1),
+  source_excerpt: z.string().trim().min(1).optional(),
 });
 
 function parseDraft(raw: string, type: QuestionType): GeneratedQuestion | null {
@@ -456,6 +488,7 @@ function parseDraft(raw: string, type: QuestionType): GeneratedQuestion | null {
       answer: result.data.answer,
       explanation: result.data.explanation,
       coreFact: result.data.core_fact,
+      sourceExcerpt: result.data.source_excerpt ?? null,
       // Placeholder — generateSlot overwrites this with the real
       // complexity-derived value once effectiveDifficulty is known.
       timeLimitSecs: DEFAULT_TIME_LIMIT_SECS,
@@ -472,6 +505,7 @@ function parseDraft(raw: string, type: QuestionType): GeneratedQuestion | null {
     answer: result.data.answer,
     explanation: result.data.explanation,
     coreFact: result.data.core_fact,
+    sourceExcerpt: result.data.source_excerpt ?? null,
     timeLimitSecs: DEFAULT_TIME_LIMIT_SECS,
   };
 }
@@ -543,6 +577,14 @@ async function attemptDraft(params: {
 
   const parsed = parseDraft(raw, params.type);
   if (!parsed) return { ok: false, reason: "invalid_json", raw };
+
+  // Applies to both question types (unlike the answer-verbatim check below,
+  // which is multiple_choice-only) — a true_false statement is often
+  // paraphrased or a deliberately altered fact, so it can't be required to
+  // be verbatim itself, but the excerpt backing it can.
+  if (params.sourceText.trim() && (!parsed.sourceExcerpt || !isVerbatimInSource(parsed.sourceExcerpt, params.sourceText))) {
+    return { ok: false, reason: "excerpt_not_verbatim", raw };
+  }
 
   if (parsed.type === "multiple_choice") {
     const overLong = findOverLongChoice(parsed.choices);
@@ -616,6 +658,15 @@ function repairPrompt(reason: FailureReason, raw: string, duplicateOf?: string):
       "The correct answer's wording doesn't appear verbatim in the course-note excerpt — it looks paraphrased " +
       "or reworded. Copy the correct answer's exact wording straight from the excerpt instead (the three wrong " +
       "choices don't need to be verbatim). Respond again with ONLY the corrected JSON object."
+    );
+  }
+  if (reason === "excerpt_not_verbatim") {
+    return (
+      `Here is what you sent:\n${raw}\n\n` +
+      "The \"source_excerpt\" field is missing, or doesn't appear verbatim in the course-note excerpt above — " +
+      "it looks paraphrased, shortened, or spliced together from separate sentences. Copy a single contiguous " +
+      "phrase or sentence exactly as written in the excerpt, character-for-character. Respond again with ONLY " +
+      "the corrected JSON object."
     );
   }
   return (

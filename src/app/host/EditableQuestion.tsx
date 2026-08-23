@@ -10,6 +10,11 @@ type Question = {
   choices: string[];
   correctChoices: string[];
   timeLimitSecs: number;
+  /** Verbatim quote from the course notes the generator backed this
+   * question with — absent for manually-added questions. Shown as-is (not
+   * re-derived from any in-progress edits) since it describes where the
+   * originally-generated version came from. */
+  sourceExcerpt?: string | null;
 };
 
 function sameChoices(a: string[], b: string[]) {
@@ -178,6 +183,11 @@ export function EditableQuestion({
           className="input-field flex-1 resize-y font-semibold text-ink"
         />
       </label>
+      {question.sourceExcerpt && (
+        <p className="mt-1 pl-5 text-xs text-ink-soft italic">
+          Source: “{question.sourceExcerpt}”
+        </p>
+      )}
       <p className="mt-1 text-xs text-ink-soft">
         {isMultiSelect ? "Select all correct answers" : "Select the correct answer"}
         {editableChoiceText ? " and edit choice text" : ""}.

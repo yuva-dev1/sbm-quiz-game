@@ -8,6 +8,13 @@ type NewQuestionInput = {
   correctChoices: string[];
   explanation: string;
   timeLimitSecs: number;
+  /** Verbatim quote from the course notes backing this question, self-
+   * reported and verified by the generator (src/lib/localQuizGenerator.ts) —
+   * absent for manually-authored questions (see AddQuestionForm) and for
+   * ungrounded generation. Shown in the host's draft/published question
+   * preview so a question's grounding can actually be checked, not just
+   * trusted. */
+  sourceExcerpt?: string | null;
 };
 
 /**

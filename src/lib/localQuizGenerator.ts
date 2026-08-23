@@ -70,7 +70,13 @@ import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS, DEFAULT_TIME_LIMIT_SECS } fro
 const DEFAULT_PRIMARY_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_FALLBACK_MODEL = "google/gemini-2.5-flash";
 const CONCURRENCY = 4;
-const MULTIPLE_CHOICE_RATIO = 0.75;
+// Target share of a quiz that's true/false, the rest multiple_choice. Held
+// to an exact per-quiz quota (see assignQuestionTypes) rather than a
+// per-question coin flip — QA feedback was that quizzes were landing with
+// noticeably more true/false than intended, which a per-slot Bernoulli draw
+// allows by chance even at the right long-run average (a 10-question quiz at
+// a 25% flip has a real chance of drawing 4-5 true/false).
+const TRUE_FALSE_RATIO = 0.2;
 const FAITHFULNESS_THRESHOLD = 0.7;
 const DUPLICATE_OVERLAP_THRESHOLD = 0.5;
 // Slightly higher than DUPLICATE_OVERLAP_THRESHOLD: explanations in this
@@ -166,15 +172,55 @@ type FailureReason =
   | "ambiguous"
   | "not_verbatim"
   | "choice_too_long"
-  | "excerpt_not_verbatim";
+  | "excerpt_not_verbatim"
+  | "difficulty_mismatch";
 
-const DIFFICULTY_GUIDANCE: Record<EffectiveDifficulty, string> = {
-  beginner:
-    "a straightforward recall question testing one clearly stated fact from the topic — e.g. " +
-    '"What was significant about [a named event/reason/outcome]?" — short and direct, answerable ' +
-    "in one read with no re-reading or careful parsing required",
-  intermediate: "a question that asks the student to connect two related ideas or explain significance, not just recall an isolated fact",
-  advanced: "a challenging, reflective question probing deeper meaning, context, or application — not answerable from a single isolated fact",
+/**
+ * Writing instruction and judge criteria are defined together per tier
+ * (rather than as two separately-maintained lists) so the difficulty
+ * conformance judge (checkDifficultyMatch) can never reject a question for
+ * failing to do something the generation prompt was never told to do — QA
+ * feedback was that "Discussion" (intermediate) and "Mixed" quizzes felt
+ * indistinguishable from "Foundations" (beginner) because the old one-line
+ * guidance ("connect two related ideas or explain significance") was too
+ * abstract for a small model to reliably act on, and nothing ever checked
+ * whether it had.
+ */
+const DIFFICULTY_SPEC: Record<EffectiveDifficulty, { writingInstruction: string; judgeCriteria: string }> = {
+  beginner: {
+    writingInstruction:
+      "a straightforward recall question answerable directly from ONE explicit clause or sentence in the " +
+      'source — e.g. "What was Kunti Devi\'s prayer regarding calamities?" Do not phrase it as "why", "how ' +
+      'does this relate to", or "what does this signify", and do not require connecting two separate facts — ' +
+      "a student should be able to point to a single sentence in the source and be done.",
+    judgeCriteria:
+      "PASSES only if the question is answerable by locating a single explicit statement in the source, with " +
+      'no need to connect it to any other fact or interpret its significance. FAILS if it uses "why" / "how ' +
+      'does X relate to Y" / "what does this signify" phrasing, or if answering it requires combining two ' +
+      "separate facts from the source.",
+  },
+  intermediate: {
+    writingInstruction:
+      "a question that names two distinct facts, people, or events from the source and asks the student to " +
+      "connect them — a cause and its stated effect, a person and the stated reason for their action, or how " +
+      "two described events relate — not a question answerable from a single isolated clause.",
+    judgeCriteria:
+      "PASSES only if answering requires connecting two distinct named facts/entities from the source (e.g. a " +
+      "cause and its effect, or a person and the reason behind their action). FAILS if it's answerable from " +
+      "one isolated clause with nothing to connect, and also FAILS if it's a broad interpretive/thematic " +
+      "question with no two concrete facts actually being connected.",
+  },
+  advanced: {
+    writingInstruction:
+      "a reflective question asking what a described event, teaching, or statement in the source signifies, " +
+      "why it matters, or what it reveals — going beyond restating what happened to its significance or " +
+      "implication, while staying strictly grounded in what the source actually says (do not introduce outside " +
+      "interpretation not supported by the excerpt).",
+    judgeCriteria:
+      "PASSES only if it asks for the significance, implication, or deeper meaning of something in the " +
+      "source, not just what happened. FAILS if it's simple recall answerable directly from one clause with " +
+      "no interpretation asked for.",
+  },
 };
 
 // Weighted, not uniform: QA feedback singled out an easy, single-fact
@@ -198,8 +244,24 @@ function pickEffectiveDifficulty(difficulty: Difficulty): EffectiveDifficulty {
   return "advanced";
 }
 
-function pickQuestionType(): QuestionType {
-  return Math.random() < MULTIPLE_CHOICE_RATIO ? "multiple_choice" : "true_false";
+/**
+ * Assigns each slot in the quiz a fixed question type up front, holding the
+ * true/false share to an exact quota (see TRUE_FALSE_RATIO) instead of
+ * rolling it per-slot — a slot's type is decided once here and stays fixed
+ * across every retry/repair round in generateQuiz, so the final quiz can't
+ * drift off the target ratio no matter how many slots need re-rolling.
+ */
+function assignQuestionTypes(questionCount: number): QuestionType[] {
+  const trueFalseCount = Math.min(questionCount, Math.round(questionCount * TRUE_FALSE_RATIO));
+  const types: QuestionType[] = [
+    ...Array<QuestionType>(trueFalseCount).fill("true_false"),
+    ...Array<QuestionType>(questionCount - trueFalseCount).fill("multiple_choice"),
+  ];
+  for (let i = types.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [types[i], types[j]] = [types[j], types[i]];
+  }
+  return types;
 }
 
 function normalizeWords(text: string): Set<string> {
@@ -326,6 +388,60 @@ async function checkAnswerable(question: GeneratedQuestion, sourceText: string, 
   }
 }
 
+const DifficultyJudgeSchema = z.object({
+  matches: z.boolean(),
+  reason: z.string().optional(),
+});
+
+/**
+ * Judges whether a drafted question actually matches the difficulty tier it
+ * was written for, using the same pass/fail criteria (DIFFICULTY_SPEC) the
+ * generation prompt was given — added because plain instruction text alone
+ * wasn't reliably producing a felt difference between tiers (QA feedback:
+ * "Discussion" and "Mixed" felt the same as "Foundations"). Returns null
+ * (skip — don't block on it) if the judge call itself fails or returns
+ * something unparseable, same as checkAnswerable.
+ */
+async function checkDifficultyMatch(
+  question: GeneratedQuestion,
+  effectiveDifficulty: EffectiveDifficulty,
+  judgeModel: string
+): Promise<boolean | null> {
+  const spec = DIFFICULTY_SPEC[effectiveDifficulty];
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are a strict quality reviewer checking whether a quiz question actually matches the difficulty " +
+        "tier it was written for. Respond with a single strict JSON object only — no markdown code fences, " +
+        "no commentary.",
+    },
+    {
+      role: "user",
+      content: [
+        `Question: ${question.question}`,
+        question.type === "multiple_choice" ? `Choices: ${question.choices.join(" / ")}` : "",
+        `Marked answer: ${question.answer}`,
+        "",
+        `Target difficulty tier: "${effectiveDifficulty}". ${spec.judgeCriteria}`,
+        "",
+        'Return JSON matching exactly this shape: {"matches": true or false, "reason": "one short sentence"}',
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+  ];
+
+  const raw = await tryComplete(judgeModel, messages);
+  if (!raw) return null;
+  try {
+    const result = DifficultyJudgeSchema.safeParse(JSON.parse(raw));
+    return result.success ? result.data.matches : null;
+  } catch {
+    return null;
+  }
+}
+
 function clampSourceText(sourceText: string): string {
   if (sourceText.length <= MAX_SOURCE_TEXT_CHARS) return sourceText;
   return sourceText.slice(0, MAX_SOURCE_TEXT_CHARS) + "\n\n[...source truncated...]";
@@ -342,8 +458,11 @@ function buildSystemPrompt(grounded: boolean): string {
   }
   return (
     `${base} Base every claim in the question, answer, and explanation strictly on the course-note ` +
-    "excerpt provided below — do not introduce facts, names, or details that aren't present in it, " +
-    "even if they're true of the Srimad Bhagavatam in general."
+    "excerpt provided below. Treat it as your only source of truth: do not use outside knowledge of the " +
+    "Srimad Bhagavatam, do not consult or rely on anything beyond this excerpt, and do not invent or infer " +
+    "names, numbers, dates, or details that aren't explicitly written in it — even facts you are confident " +
+    "are true of the Srimad Bhagavatam in general. If it is not written in the excerpt, it does not exist " +
+    "for the purposes of this question."
   );
 }
 
@@ -361,10 +480,14 @@ function buildUserPrompt(params: {
 
   if (params.sourceText.trim()) {
     lines.push(
-      "Course-note excerpt (this is your only source — do not use outside knowledge beyond what's written here):",
+      "Course-note excerpt (this is your ONLY source of truth — do not use outside knowledge, do not fill " +
+        "gaps with plausible-sounding invented details, and do not draw on anything not explicitly written " +
+        "here, even if you're confident it's true of the Srimad Bhagavatam in general):",
       '"""',
       params.sourceText.trim(),
       '"""',
+      "Every name, fact, and number in your question, answer, and explanation must trace back to a specific " +
+        "phrase in this excerpt.",
       ""
     );
   }
@@ -375,8 +498,8 @@ function buildUserPrompt(params: {
       ? `Focus this question specifically on: ${params.focusTopic}. (Full topic list for context: ${topicList}.)`
       : `Topics to draw from: ${topicList}.`,
     params.type === "multiple_choice"
-      ? `Write ${DIFFICULTY_GUIDANCE[params.effectiveDifficulty]}.`
-      : `Write ${DIFFICULTY_GUIDANCE[params.effectiveDifficulty]}, phrased as a true/false statement.`
+      ? `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}`
+      : `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}, phrased as a true/false statement.`
   );
 
   if (params.avoidEntries.length > 0) {
@@ -569,6 +692,7 @@ async function attemptDraft(params: {
   judgeModel: string;
   messages: ChatMessage[];
   type: QuestionType;
+  effectiveDifficulty: EffectiveDifficulty;
   sourceText: string;
   avoidEntries: GeneratedQuestion[];
 }): Promise<AttemptResult> {
@@ -600,6 +724,11 @@ async function attemptDraft(params: {
     return { ok: false, reason: "duplicate", raw, duplicateOf: duplicate.question };
   }
 
+  const difficultyMatches = await checkDifficultyMatch(parsed, params.effectiveDifficulty, params.judgeModel);
+  if (difficultyMatches === false) {
+    return { ok: false, reason: "difficulty_mismatch", raw };
+  }
+
   const claim = `Question: ${parsed.question}\nAnswer: ${parsed.answer}\nExplanation: ${parsed.explanation}`;
   const faithfulness = await scoreFaithfulness(claim, params.sourceText, params.judgeModel);
   if (faithfulness !== null && faithfulness < FAITHFULNESS_THRESHOLD) {
@@ -616,7 +745,7 @@ async function attemptDraft(params: {
   return { ok: true, question: parsed };
 }
 
-function repairPrompt(reason: FailureReason, raw: string, duplicateOf?: string): string {
+function repairPrompt(reason: FailureReason, raw: string, effectiveDifficulty: EffectiveDifficulty, duplicateOf?: string): string {
   if (reason === "invalid_json") {
     return (
       `That response was not valid JSON matching the requested shape. Here is what you sent:\n${raw}\n\n` +
@@ -669,6 +798,14 @@ function repairPrompt(reason: FailureReason, raw: string, duplicateOf?: string):
       "the corrected JSON object."
     );
   }
+  if (reason === "difficulty_mismatch") {
+    return (
+      `Here is what you sent:\n${raw}\n\n` +
+      `That question doesn't actually match its assigned "${effectiveDifficulty}" difficulty tier. Write ` +
+      `${DIFFICULTY_SPEC[effectiveDifficulty].writingInstruction} Respond again with ONLY the corrected JSON ` +
+      "object."
+    );
+  }
   return (
     `Here is what you sent:\n${raw}\n\n` +
     "That question, answer, or explanation wasn't clearly supported by the course-note excerpt above — " +
@@ -678,6 +815,7 @@ function repairPrompt(reason: FailureReason, raw: string, duplicateOf?: string):
 }
 
 async function generateSlot(params: {
+  type: QuestionType;
   topics: string[];
   focusTopic: string | null;
   coverageLabel: string;
@@ -687,7 +825,7 @@ async function generateSlot(params: {
   primaryModel: string;
   fallbackModel: string;
 }): Promise<GeneratedQuestion | null> {
-  const type = pickQuestionType();
+  const type = params.type;
   const effectiveDifficulty = pickEffectiveDifficulty(params.difficulty);
   const messages: ChatMessage[] = [
     { role: "system", content: buildSystemPrompt(params.sourceText.trim().length > 0) },
@@ -710,6 +848,7 @@ async function generateSlot(params: {
     judgeModel: params.fallbackModel,
     messages,
     type,
+    effectiveDifficulty,
     sourceText: params.sourceText,
     avoidEntries: params.avoidEntries,
   });
@@ -718,13 +857,14 @@ async function generateSlot(params: {
   if (first.raw) {
     const repairMessages: ChatMessage[] = [
       ...messages,
-      { role: "user", content: repairPrompt(first.reason, first.raw, first.duplicateOf) },
+      { role: "user", content: repairPrompt(first.reason, first.raw, effectiveDifficulty, first.duplicateOf) },
     ];
     const second = await attemptDraft({
       model: params.primaryModel,
       judgeModel: params.fallbackModel,
       messages: repairMessages,
       type,
+      effectiveDifficulty,
       sourceText: params.sourceText,
       avoidEntries: params.avoidEntries,
     });
@@ -736,6 +876,7 @@ async function generateSlot(params: {
     judgeModel: params.primaryModel,
     messages,
     type,
+    effectiveDifficulty,
     sourceText: params.sourceText,
     avoidEntries: params.avoidEntries,
   });
@@ -775,6 +916,12 @@ export async function generateQuiz(params: {
   const focusTopicFor = (slotIndex: number, round: number): string | null =>
     shuffledTopics.length > 0 ? shuffledTopics[(slotIndex + round) % shuffledTopics.length] : null;
 
+  // Assigned once per slot up front (not re-rolled on retry) so the quiz's
+  // overall true/false-vs-multiple_choice mix stays exactly on target no
+  // matter how many rounds a slot needs before it fills — see
+  // assignQuestionTypes.
+  const slotTypes = assignQuestionTypes(params.questionCount);
+
   const slots: (GeneratedQuestion | null)[] = new Array(params.questionCount).fill(null);
   let completedCount = 0;
 
@@ -788,6 +935,7 @@ export async function generateQuiz(params: {
           ...slots.filter((q): q is GeneratedQuestion => q !== null),
         ];
         slots[slotIndex] = await generateSlot({
+          type: slotTypes[slotIndex],
           topics: params.topics,
           focusTopic: focusTopicFor(slotIndex, round),
           coverageLabel: params.coverageLabel,

@@ -153,15 +153,33 @@ type QuestionType = "multiple_choice" | "true_false";
 type FailureReason = "invalid_json" | "low_faithfulness" | "duplicate" | "ambiguous" | "not_verbatim" | "choice_too_long";
 
 const DIFFICULTY_GUIDANCE: Record<EffectiveDifficulty, string> = {
-  beginner: "a straightforward recall question testing a clearly stated fact from the topic",
+  beginner:
+    "a straightforward recall question testing one clearly stated fact from the topic — e.g. " +
+    '"What was significant about [a named event/reason/outcome]?" — short and direct, answerable ' +
+    "in one read with no re-reading or careful parsing required",
   intermediate: "a question that asks the student to connect two related ideas or explain significance, not just recall an isolated fact",
   advanced: "a challenging, reflective question probing deeper meaning, context, or application — not answerable from a single isolated fact",
 };
 
+// Weighted, not uniform: QA feedback singled out an easy, single-fact
+// question as the target feel for most of a quiz, with only the occasional
+// harder one — a plain 1-in-3 split was landing a third of every "mixed"
+// quiz on intermediate/advanced, too much for that goal.
+const MIXED_DIFFICULTY_WEIGHTS: Record<EffectiveDifficulty, number> = {
+  beginner: 0.7,
+  intermediate: 0.2,
+  advanced: 0.1,
+};
+
 function pickEffectiveDifficulty(difficulty: Difficulty): EffectiveDifficulty {
   if (difficulty !== "mixed") return difficulty;
-  const pool: EffectiveDifficulty[] = ["beginner", "intermediate", "advanced"];
-  return pool[Math.floor(Math.random() * pool.length)];
+  const roll = Math.random();
+  let cumulative = 0;
+  for (const [tier, weight] of Object.entries(MIXED_DIFFICULTY_WEIGHTS) as [EffectiveDifficulty, number][]) {
+    cumulative += weight;
+    if (roll < cumulative) return tier;
+  }
+  return "advanced";
 }
 
 function pickQuestionType(): QuestionType {

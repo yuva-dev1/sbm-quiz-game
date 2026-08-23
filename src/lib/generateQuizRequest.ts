@@ -111,6 +111,9 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
       // threshold), same as the empty explanation above; the other checks
       // still apply.
       coreFact: "",
+      // Unused by findDuplicate (the only thing this array feeds) — no need
+      // to read the stored value back out for this.
+      sourceExcerpt: null,
       // Only used for findDuplicate's avoid-list — timing is never derived
       // from these rows, so the actual stored value doesn't matter here.
       timeLimitSecs: row.timeLimitSecs,

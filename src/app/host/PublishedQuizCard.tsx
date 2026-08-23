@@ -13,6 +13,7 @@ type PublishedQuestion = {
   choices: string[];
   correctChoices: string[];
   timeLimitSecs: number;
+  sourceExcerpt?: string | null;
 };
 
 export function PublishedQuizCard({

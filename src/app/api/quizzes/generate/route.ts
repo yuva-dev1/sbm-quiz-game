@@ -48,6 +48,7 @@ export async function POST(request: Request) {
             correctChoices: [question.answer],
             explanation: question.explanation,
             timeLimitSecs: question.timeLimitSecs,
+            sourceExcerpt: question.sourceExcerpt,
           })),
         });
 

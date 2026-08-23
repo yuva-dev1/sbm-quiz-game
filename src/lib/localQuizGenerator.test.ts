@@ -61,6 +61,10 @@ function validDraftFor(messages: ChatMessage[]): string {
     return JSON.stringify({ answerable: true, reason: "fine" });
   }
   const index = draftCounter++ % MULTIPLE_CHOICE_FACTS.length;
+  // Verbatim within the one grounded sourceText any of these tests use (see
+  // the faithfulness-check tests below) — harmless filler for every other
+  // test here, which passes sourceText: "" and so never checks this field.
+  const sourceExcerpt = "Sukadeva Goswami, Vyasa, Sukadeva, Pariksit, and Shringi";
   if (requestedType(messages) === "true_false") {
     return JSON.stringify({
       type: "true_false",
@@ -68,9 +72,15 @@ function validDraftFor(messages: ChatMessage[]): string {
       answer: "True",
       explanation: "Because.",
       core_fact: TRUE_FALSE_CORE_FACTS[index],
+      source_excerpt: sourceExcerpt,
     });
   }
-  return JSON.stringify({ type: "multiple_choice", ...MULTIPLE_CHOICE_FACTS[index], explanation: "Because." });
+  return JSON.stringify({
+    type: "multiple_choice",
+    ...MULTIPLE_CHOICE_FACTS[index],
+    explanation: "Because.",
+    source_excerpt: sourceExcerpt,
+  });
 }
 
 describe("generateQuiz", () => {
@@ -446,6 +456,7 @@ describe("generateQuiz", () => {
             answer: "True",
             explanation: "",
             coreFact: "",
+            sourceExcerpt: null,
             timeLimitSecs: 20,
           },
         ],

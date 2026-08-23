@@ -12,6 +12,7 @@ type DraftQuestion = {
   choices: string[];
   correctChoices: string[];
   timeLimitSecs: number;
+  sourceExcerpt?: string | null;
 };
 
 export function QuizDraftCard({

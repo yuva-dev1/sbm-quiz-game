@@ -15,7 +15,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const data: {
     title?: string;
-    status?: "PUBLISHED";
+    status?: "PUBLISHED" | "DRAFT";
     showLeaderboardDefault?: boolean;
     showTimerDefault?: boolean;
     scoringMode?: "SPEED" | "ACCURACY";
@@ -36,6 +36,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   if (body?.publish === true) {
     data.status = "PUBLISHED";
+  } else if (body?.unpublish === true) {
+    data.status = "DRAFT";
   }
 
   if (typeof body?.showLeaderboardDefault === "boolean") {
@@ -123,16 +125,23 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   const { id } = await params;
 
   const quizRef = firestore.collection("quizzes").doc(id);
-  const [quizSnap, gameSessionCountSnap, responseCountSnap] = await Promise.all([
+  const [quizSnap, liveSessionCountSnap, responseCountSnap] = await Promise.all([
     quizRef.get(),
-    firestore.collection("gameSessions").where("quizId", "==", id).count().get(),
+    // Only LOBBY/ACTIVE sessions block deletion — COMPLETED ones are just
+    // historical results and shouldn't permanently pin the quiz in place.
+    // "Kill all live sessions" (killLiveSessionsForQuiz) is what unblocks
+    // this for a quiz that still has games running.
+    firestore.collection("gameSessions").where("quizId", "==", id).where("status", "in", ["LOBBY", "ACTIVE"]).count().get(),
     quizRef.collection("responses").count().get(),
   ]);
   if (!quizSnap.exists) {
     return Response.json({ error: "Quiz not found." }, { status: 404 });
   }
-  if (gameSessionCountSnap.data().count > 0) {
-    return Response.json({ error: "This quiz has game sessions and can't be deleted." }, { status: 400 });
+  if (liveSessionCountSnap.data().count > 0) {
+    return Response.json(
+      { error: "This quiz has live game sessions and can't be deleted. Kill them first." },
+      { status: 400 }
+    );
   }
   if (responseCountSnap.data().count > 0) {
     return Response.json({ error: "This quiz has responses and can't be deleted." }, { status: 400 });

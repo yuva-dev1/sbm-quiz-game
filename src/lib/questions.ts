@@ -9,7 +9,7 @@ import {
   computeRawReactionTimeMs,
   computeTrueReactionTimeMs,
 } from "@/lib/scoring";
-import { addPoints, finalizeSession, publishLeaderboardUpdate } from "@/lib/leaderboard";
+import { addPoints, publishLeaderboardUpdate } from "@/lib/leaderboard";
 
 export class QuestionFlowError extends Error {
   constructor(message: string) {
@@ -187,8 +187,11 @@ export async function revealQuestionAfterQuote(pin: string): Promise<QuestionSta
  * triggered by the host's Lock Now button or their countdown hitting zero.
  *
  * Once locked, this is also the session's "grading window closed" moment
- * (Story 5.1): the leaderboard broadcasts here, and if this was the last
- * question, the session is finalized straight into the podium (Story 5.3).
+ * (Story 5.1): the leaderboard broadcasts here. Locking the last question
+ * does NOT auto-finalize the session — the host explicitly reveals results
+ * via the "Reveal results" button (POST /api/sessions/[pin]/end, same
+ * finalize path as ending a game early), so the room doesn't get yanked to
+ * the podium the instant the last answer is graded.
  *
  * correctCount/incorrectCount/choiceCounts are read directly off the
  * question doc rather than aggregated here — submitAnswer maintains them
@@ -221,11 +224,6 @@ export async function lockCurrentQuestion(pin: string) {
   const choiceCounts = current.choices.map((_, i) => choiceCountsMap[String(i)] ?? 0);
 
   await publishToSession(pin, SessionEvent.AnswerBreakdown, { correctCount, incorrectCount, choiceCounts });
-
-  const isLastQuestion = current.order === session.questions.length - 1;
-  if (isLastQuestion) {
-    await finalizeSession(pin);
-  }
 }
 
 const ANSWER_COUNT_THROTTLE_MS = 300;

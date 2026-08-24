@@ -1,0 +1,68 @@
+name: Deploy logs
+
+# Cloud Build's own GitHub trigger (not this workflow) does the actual
+# build + Cloud Run deploy on push to main — see CLAUDE.md. This workflow
+# is a read-only observer: it finds that same build by commit SHA and
+# streams its logs into the Actions run, so deploy output is visible here
+# without leaving GitHub. It cannot trigger, cancel, or modify builds.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GCP_PROJECT: namabiksha-v1
+  BUILD_TRIGGER_ID: acd05f3a-77ec-4e27-9f99-3f832c544f8d
+
+permissions:
+  contents: read
+  id-token: write # required to mint the OIDC token Workload Identity Federation exchanges
+
+jobs:
+  stream-cloud-build-log:
+    name: Stream Cloud Build log
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/876193044983/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
+          service_account: github-actions-log-viewer@namabiksha-v1.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Find the Cloud Build build for this commit
+        id: find-build
+        run: |
+          echo "Waiting for Cloud Build to register a build for $GITHUB_SHA..."
+          for _ in $(seq 1 30); do
+            BUILD_ID=$(gcloud builds list \
+              --project="$GCP_PROJECT" \
+              --filter="buildTriggerId=${BUILD_TRIGGER_ID} AND substitutions.COMMIT_SHA=${GITHUB_SHA}" \
+              --format="value(id)" \
+              --limit=1)
+            if [ -n "$BUILD_ID" ]; then
+              echo "Found build $BUILD_ID"
+              echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::No Cloud Build build appeared for commit $GITHUB_SHA within 5 minutes."
+          exit 1
+
+      - name: Stream build + deploy logs
+        run: gcloud builds log "${{ steps.find-build.outputs.build_id }}" --project="$GCP_PROJECT" --stream
+
+      - name: Check final build status
+        run: |
+          BUILD_ID="${{ steps.find-build.outputs.build_id }}"
+          STATUS=$(gcloud builds describe "$BUILD_ID" --project="$GCP_PROJECT" --format="value(status)")
+          LOG_URL=$(gcloud builds describe "$BUILD_ID" --project="$GCP_PROJECT" --format="value(logUrl)")
+          {
+            echo "### Cloud Build result: $STATUS"
+            echo "[View in Cloud Console]($LOG_URL)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$STATUS" != "SUCCESS" ]; then
+            echo "::error::Cloud Build finished with status $STATUS."
+            exit 1
+          fi

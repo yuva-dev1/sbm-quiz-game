@@ -724,22 +724,28 @@ async function attemptDraft(params: {
     return { ok: false, reason: "duplicate", raw, duplicateOf: duplicate.question };
   }
 
-  const difficultyMatches = await checkDifficultyMatch(parsed, params.effectiveDifficulty, params.judgeModel);
+  // The three LLM-judge checks below are independent of each other (each
+  // judges the same drafted question from a different angle) so they run
+  // concurrently rather than as three back-to-back round trips — with the
+  // difficulty-conformance judge added on top of the pre-existing
+  // faithfulness/answerability checks, running them in series was adding a
+  // third full model round trip to every single draft attempt and was the
+  // dominant cause of slow quiz generation.
+  const claim = `Question: ${parsed.question}\nAnswer: ${parsed.answer}\nExplanation: ${parsed.explanation}`;
+  const [difficultyMatches, faithfulness, answerable] = await Promise.all([
+    checkDifficultyMatch(parsed, params.effectiveDifficulty, params.judgeModel),
+    scoreFaithfulness(claim, params.sourceText, params.judgeModel),
+    parsed.type === "multiple_choice" ? checkAnswerable(parsed, params.sourceText, params.judgeModel) : Promise.resolve(null),
+  ]);
+
   if (difficultyMatches === false) {
     return { ok: false, reason: "difficulty_mismatch", raw };
   }
-
-  const claim = `Question: ${parsed.question}\nAnswer: ${parsed.answer}\nExplanation: ${parsed.explanation}`;
-  const faithfulness = await scoreFaithfulness(claim, params.sourceText, params.judgeModel);
   if (faithfulness !== null && faithfulness < FAITHFULNESS_THRESHOLD) {
     return { ok: false, reason: "low_faithfulness", raw };
   }
-
-  if (parsed.type === "multiple_choice") {
-    const answerable = await checkAnswerable(parsed, params.sourceText, params.judgeModel);
-    if (answerable === false) {
-      return { ok: false, reason: "ambiguous", raw };
-    }
+  if (parsed.type === "multiple_choice" && answerable === false) {
+    return { ok: false, reason: "ambiguous", raw };
   }
 
   return { ok: true, question: parsed };
@@ -957,8 +963,25 @@ export async function generateQuiz(params: {
   // shot at every topic before this gives up on it, not just whichever
   // number of topics the flat MAX_FILL_ROUNDS floor happens to cover.
   const maxRounds = Math.max(MAX_FILL_ROUNDS, shuffledTopics.length);
+  // A slot's assigned type is fixed for its first couple of rounds so the
+  // requested true/false ratio holds in the common case, but a slot that's
+  // still empty after that gets its type flipped (once) rather than kept
+  // fighting for a type the source material for its topic may not actually
+  // support well — hitting the requested *question count* takes priority
+  // over hitting the exact ratio for one stuck slot. Without this, a whole
+  // quiz could come back short by exactly its true/false quota if every
+  // true/false slot happened to land on thin material.
+  const TYPE_FLIP_AFTER_ROUNDS = 2;
+  const flippedSlots = new Set<number>();
   let indicesToFill = slots.map((_, i) => i);
   for (let round = 0; indicesToFill.length > 0 && round < maxRounds; round++) {
+    if (round >= TYPE_FLIP_AFTER_ROUNDS) {
+      for (const index of indicesToFill) {
+        if (flippedSlots.has(index)) continue;
+        slotTypes[index] = slotTypes[index] === "true_false" ? "multiple_choice" : "true_false";
+        flippedSlots.add(index);
+      }
+    }
     completedCount = params.questionCount - indicesToFill.length;
     await runPass(indicesToFill, round === 0 ? "draft" : "repairing", round);
 

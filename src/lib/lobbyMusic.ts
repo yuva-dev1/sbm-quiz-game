@@ -16,19 +16,49 @@
  * enforces this strictly, Chrome less so but still inconsistently for a
  * fresh domain with no prior media-engagement history.
  */
+const BASE_VOLUME = 0.5;
+const FADE_OUT_MS = 1000;
+const FADE_STEPS = 20;
+
 let audio: HTMLAudioElement | null = null;
 
 export function startLobbyMusic() {
   if (!audio) {
     audio = new Audio("/audio/lobby-music.mp3");
     audio.loop = true;
-    audio.volume = 0.5;
+    audio.volume = BASE_VOLUME;
   }
   audio.play().catch(() => {});
 }
 
+// Fades out over a second rather than cutting off mid-note when the quiz
+// starts. Detaches the module's reference immediately (rather than at the
+// end of the fade) so a stop followed right away by a fresh
+// startLobbyMusic() call creates a new element instead of fighting the old
+// one's fade-out for control of the same <audio>.
+//
+// iOS Safari ignores HTMLMediaElement.volume entirely (it defers to the
+// hardware volume buttons), so this degrades there to a delayed hard stop
+// after FADE_OUT_MS rather than an audible ramp — acceptable, and not worth
+// the added complexity of a Web Audio API GainNode (which brings its own
+// autoplay-gesture requirements) just for this nicety.
 export function stopLobbyMusic() {
-  audio?.pause();
+  const el = audio;
+  if (!el) return;
+  audio = null;
+
+  const startVolume = el.volume;
+  let step = 0;
+  const fade = setInterval(() => {
+    step += 1;
+    if (step >= FADE_STEPS) {
+      clearInterval(fade);
+      el.pause();
+      el.volume = BASE_VOLUME;
+      return;
+    }
+    el.volume = Math.max(0, startVolume * (1 - step / FADE_STEPS));
+  }, FADE_OUT_MS / FADE_STEPS);
 }
 
 /** Retry hook for HostLobby: covers the case where the host lands on

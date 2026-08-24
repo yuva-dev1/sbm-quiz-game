@@ -5,6 +5,7 @@ import { useState } from "react";
 import { StartGameButton } from "./StartGameButton";
 import { EditableQuestion } from "./EditableQuestion";
 import { AddQuestionForm } from "./AddQuestionForm";
+import { QuizHistoryPanel } from "./QuizHistoryPanel";
 
 type PublishedQuestion = {
   id: string;
@@ -153,6 +154,8 @@ export function PublishedQuizCard({
           />
         </ol>
       )}
+
+      <QuizHistoryPanel quizId={quiz.id} />
 
       {error && <p className="text-sm text-danger">{error}</p>}
     </li>

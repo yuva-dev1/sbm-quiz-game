@@ -196,6 +196,58 @@ export async function killLiveSessionsForQuiz(quizId: string): Promise<number> {
   return liveSnap.docs.length;
 }
 
+const HISTORY_SESSION_LIMIT = 10;
+const HISTORY_TOP_PLAYERS = 5;
+
+export type SessionHistoryEntry = {
+  sessionId: string;
+  pin: string;
+  playedAt: Date;
+  playerCount: number;
+  topPlayers: { playerId: string; nickname: string; rank: number; totalPoints: number }[];
+};
+
+/**
+ * Past completed games for a quiz, most recent first, capped at 10 (the host
+ * page's "History" panel) — each with its top-5 finishers. `results` docs
+ * only exist once a session is finalized (see finalizeSession in
+ * leaderboard.ts), so this naturally excludes anything still LOBBY/ACTIVE.
+ */
+export async function getQuizSessionHistory(quizId: string): Promise<SessionHistoryEntry[]> {
+  const sessionsSnap = await firestore
+    .collection("gameSessions")
+    .where("quizId", "==", quizId)
+    .where("status", "==", "COMPLETED")
+    .orderBy("createdAt", "desc")
+    .limit(HISTORY_SESSION_LIMIT)
+    .get();
+
+  return Promise.all(
+    sessionsSnap.docs.map(async (doc) => {
+      const session = doc.data();
+      const [resultsSnap, playerCountSnap] = await Promise.all([
+        doc.ref.collection("results").orderBy("rank", "asc").limit(HISTORY_TOP_PLAYERS).get(),
+        doc.ref.collection("players").count().get(),
+      ]);
+      return {
+        sessionId: doc.id,
+        pin: session.pin as string,
+        playedAt: (session.createdAt as FirebaseFirestore.Timestamp).toDate(),
+        playerCount: playerCountSnap.data().count,
+        topPlayers: resultsSnap.docs.map((resultDoc) => {
+          const result = resultDoc.data();
+          return {
+            playerId: resultDoc.id,
+            nickname: result.nickname as string,
+            rank: result.rank as number,
+            totalPoints: result.totalPoints as number,
+          };
+        }),
+      };
+    })
+  );
+}
+
 /**
  * Live mid-game override for the leaderboard/timer visibility toggles the
  * host sees on the question screen — separate from the Quiz's authoring-time

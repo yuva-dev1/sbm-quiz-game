@@ -17,6 +17,7 @@ import {
 } from "@/lib/events";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_TILE_COLORS } from "@/lib/answerShapes";
+import { retryLobbyMusicIfPaused, startLobbyMusic, stopLobbyMusic } from "@/lib/lobbyMusic";
 import { QuoteOverlay } from "@/components/QuoteOverlay";
 import { Confetti } from "@/components/Confetti";
 import type { InboundMessage } from "ably";
@@ -80,53 +81,37 @@ export function HostLobby({
   // revealed. Created once in an effect (never during render, per the
   // project's React Compiler purity rule) and driven imperatively — simpler
   // than routing them through React state for a one-shot side effect.
-  const lobbyMusicRef = useRef<HTMLAudioElement | null>(null);
   const questionRevealSoundRef = useRef<HTMLAudioElement | null>(null);
   const resultsFanfareRef = useRef<HTMLAudioElement | null>(null);
   const hasPlayedResultsFanfare = useRef(false);
 
   useEffect(() => {
-    const lobbyMusic = new Audio("/audio/lobby-music.mp3");
-    lobbyMusic.loop = true;
-    lobbyMusic.volume = 0.5;
-    lobbyMusicRef.current = lobbyMusic;
     questionRevealSoundRef.current = new Audio("/audio/question-reveal.mp3");
     resultsFanfareRef.current = new Audio("/audio/results-fanfare.mp3");
-    return () => {
-      lobbyMusic.pause();
-    };
   }, []);
 
-  // Stops the instant the quiz starts (first question appears) rather than
-  // running through the whole game — it's lobby/waiting-room music, not a
-  // game soundtrack.
-  //
-  // The click that got the host here ("Start Live Game", on the previous
-  // /host page) doesn't reliably count as the gesture browsers want before
-  // they'll allow audio with sound — Safari in particular only honours a
-  // gesture that synchronously calls play(), and this call happens later,
-  // from a React effect after a client-side route change. So play() here can
-  // get silently rejected. Fall back to retrying on the host's next tap/key
-  // press anywhere on this page, which always satisfies the gesture check.
+  // Lobby music itself is started from the "Start Live Game" button on the
+  // previous page (src/lib/lobbyMusic.ts) — that's the one guaranteed direct
+  // user gesture in this flow, which is what browsers require before they'll
+  // reliably allow audio with sound. This effect just stops it once the quiz
+  // starts (it's waiting-room music, not a game soundtrack), and retries
+  // starting it on the host's next tap/key press as a fallback for the case
+  // where the host landed here without that click (e.g. a page reload).
   useEffect(() => {
-    const lobbyMusic = lobbyMusicRef.current;
-    if (!lobbyMusic) return;
-
     if (started) {
-      lobbyMusic.pause();
+      stopLobbyMusic();
       return;
     }
 
-    lobbyMusic.play().catch(() => {});
+    startLobbyMusic();
 
-    const retryOnGesture = () => {
-      if (lobbyMusic.paused) lobbyMusic.play().catch(() => {});
-    };
+    const retryOnGesture = () => retryLobbyMusicIfPaused();
     document.addEventListener("pointerdown", retryOnGesture);
     document.addEventListener("keydown", retryOnGesture);
     return () => {
       document.removeEventListener("pointerdown", retryOnGesture);
       document.removeEventListener("keydown", retryOnGesture);
+      stopLobbyMusic();
     };
   }, [started]);
 

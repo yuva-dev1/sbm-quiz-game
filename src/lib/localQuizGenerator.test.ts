@@ -410,11 +410,21 @@ describe("generateQuiz", () => {
     randomSpy.mockRestore();
   });
 
-  it("drops a multiple_choice slot whose answerability check never passes", async () => {
-    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // forces multiple_choice every time
+  it("drops a slot whose answerability check never passes, even after its type flips to escape a stuck quota", async () => {
+    // questionCount: 1 is always assigned multiple_choice up front (see
+    // assignQuestionTypes), but a slot stuck failing for a couple of rounds
+    // gets its type flipped once as a last resort (see TYPE_FLIP_AFTER_ROUNDS
+    // in generateQuiz) so the requested question *count* doesn't get
+    // sacrificed to a type quota the material can't fill. This forces the
+    // flipped-to true_false attempt to fail too (invalid JSON), so the test
+    // still proves a genuinely unfillable slot gets dropped rather than the
+    // flip being an unconditional escape hatch.
     completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
       if (isAnswerabilityCheck(messages)) {
         return JSON.stringify({ answerable: false, reason: "always ambiguous" });
+      }
+      if (requestedType(messages) === "true_false") {
+        return "not valid json";
       }
       return validDraftFor(messages);
     });
@@ -429,7 +439,32 @@ describe("generateQuiz", () => {
         coverageLabel: "Week 1",
       })
     ).rejects.toThrow(QuizGenerationError);
-    randomSpy.mockRestore();
+  });
+
+  it("flips a stuck slot's type after enough failed rounds so the requested question count is still met", async () => {
+    // Simulates a slot whose assigned type (multiple_choice, per
+    // assignQuestionTypes for questionCount: 1) can never pass — here because
+    // the answerability judge always rejects it — while the *other* type
+    // succeeds immediately. Without the type-flip fallback this slot would
+    // be dropped and the quiz would come back short of the requested count.
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      if (isAnswerabilityCheck(messages)) {
+        return JSON.stringify({ answerable: false, reason: "always ambiguous" });
+      }
+      return validDraftFor(messages);
+    });
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 1,
+      difficulty: "mixed",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+    expect(quiz.questions[0].type).toBe("true_false");
   });
 
   it("drops a slot whose every draft duplicates an existingQuestions entry passed in by the caller", async () => {

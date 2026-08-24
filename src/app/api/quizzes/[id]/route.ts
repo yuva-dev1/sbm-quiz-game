@@ -149,9 +149,8 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
   // Firestore has no cascade delete — recursiveDelete() removes the Quiz doc
   // and every subcollection under it (questions, responses) in one call.
-  // This is the only place cascade delete is ever exercised in the app
-  // (confirmed via grep — GameSession/Player/Answer/SessionResult are never
-  // deleted anywhere), so no other cascade handling is needed elsewhere.
+  // deleteCompletedSession in sessions.ts uses the same primitive for
+  // deleting a single past GameSession from a quiz's history.
   await firestore.recursiveDelete(quizRef);
 
   return Response.json({ ok: true });

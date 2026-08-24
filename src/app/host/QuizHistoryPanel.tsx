@@ -27,6 +27,7 @@ export function QuizHistoryPanel({ quizId }: { quizId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionHistoryEntry[] | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
 
   async function toggle() {
     if (expanded) {
@@ -49,6 +50,23 @@ export function QuizHistoryPanel({ quizId }: { quizId: string }) {
     }
   }
 
+  async function handleDeleteSession(session: SessionHistoryEntry) {
+    if (!window.confirm(`Delete the game played ${formatPlayedAt(session.playedAt)} (PIN ${session.pin})? This can't be undone.`))
+      return;
+    setDeletingSessionId(session.sessionId);
+    setError(null);
+    try {
+      const response = await fetch(`/api/quizzes/${quizId}/history/${session.sessionId}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not delete this game.");
+      setSessions((current) => (current ?? []).filter((s) => s.sessionId !== session.sessionId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete this game.");
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <button type="button" onClick={toggle} className="self-start text-sm font-semibold text-brand-ink">
@@ -68,10 +86,20 @@ export function QuizHistoryPanel({ quizId }: { quizId: string }) {
                 <li key={session.sessionId} className="card flex flex-col gap-2 p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="text-sm font-semibold text-brand-ink">{formatPlayedAt(session.playedAt)}</p>
-                    <p className="text-xs text-ink-soft">
-                      PIN {session.pin} &middot; {session.playerCount} player
-                      {session.playerCount === 1 ? "" : "s"}
-                    </p>
+                    <div className="flex items-center gap-3">
+                      <p className="text-xs text-ink-soft">
+                        PIN {session.pin} &middot; {session.playerCount} player
+                        {session.playerCount === 1 ? "" : "s"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSession(session)}
+                        disabled={deletingSessionId === session.sessionId}
+                        className="text-xs font-semibold text-danger"
+                      >
+                        {deletingSessionId === session.sessionId ? "Deleting…" : "Delete game"}
+                      </button>
+                    </div>
                   </div>
                   {session.topPlayers.length === 0 ? (
                     <p className="text-sm text-ink-soft">No players finished this game.</p>

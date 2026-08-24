@@ -100,14 +100,34 @@ export function HostLobby({
   // Stops the instant the quiz starts (first question appears) rather than
   // running through the whole game — it's lobby/waiting-room music, not a
   // game soundtrack.
+  //
+  // The click that got the host here ("Start Live Game", on the previous
+  // /host page) doesn't reliably count as the gesture browsers want before
+  // they'll allow audio with sound — Safari in particular only honours a
+  // gesture that synchronously calls play(), and this call happens later,
+  // from a React effect after a client-side route change. So play() here can
+  // get silently rejected. Fall back to retrying on the host's next tap/key
+  // press anywhere on this page, which always satisfies the gesture check.
   useEffect(() => {
     const lobbyMusic = lobbyMusicRef.current;
     if (!lobbyMusic) return;
+
     if (started) {
       lobbyMusic.pause();
-    } else {
-      lobbyMusic.play().catch(() => {});
+      return;
     }
+
+    lobbyMusic.play().catch(() => {});
+
+    const retryOnGesture = () => {
+      if (lobbyMusic.paused) lobbyMusic.play().catch(() => {});
+    };
+    document.addEventListener("pointerdown", retryOnGesture);
+    document.addEventListener("keydown", retryOnGesture);
+    return () => {
+      document.removeEventListener("pointerdown", retryOnGesture);
+      document.removeEventListener("keydown", retryOnGesture);
+    };
   }, [started]);
 
   // Browsers reject play() without a prior user gesture on the page — caught

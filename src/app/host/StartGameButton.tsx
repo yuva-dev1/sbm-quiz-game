@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { startLobbyMusic, stopLobbyMusic } from "@/lib/lobbyMusic";
 
 export function StartGameButton({ quizId }: { quizId: string }) {
   const router = useRouter();
@@ -9,6 +10,10 @@ export function StartGameButton({ quizId }: { quizId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   async function handleClick() {
+    // Must be the first thing that happens in this handler — browsers only
+    // reliably allow audio-with-sound autoplay when play() runs synchronously
+    // inside the user gesture itself (see src/lib/lobbyMusic.ts).
+    startLobbyMusic();
     setIsStarting(true);
     setError(null);
     try {
@@ -23,6 +28,7 @@ export function StartGameButton({ quizId }: { quizId: string }) {
       }
       router.push(`/host/${data.pin}`);
     } catch (err) {
+      stopLobbyMusic();
       setError(err instanceof Error ? err.message : "Failed to start the game.");
       setIsStarting(false);
     }

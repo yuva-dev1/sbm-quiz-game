@@ -75,6 +75,50 @@ export function HostLobby({
   const [answerBreakdown, setAnswerBreakdown] = useState<AnswerBreakdownPayload | null>(null);
   const [activeQuote, setActiveQuote] = useState<QuoteDisplayPayload | null>(null);
 
+  // Sound effects: lobby music loops in the waiting room, a jingle plays each
+  // time a question locks, and a fanfare plays once the final results are
+  // revealed. Created once in an effect (never during render, per the
+  // project's React Compiler purity rule) and driven imperatively — simpler
+  // than routing them through React state for a one-shot side effect.
+  const lobbyMusicRef = useRef<HTMLAudioElement | null>(null);
+  const questionRevealSoundRef = useRef<HTMLAudioElement | null>(null);
+  const resultsFanfareRef = useRef<HTMLAudioElement | null>(null);
+  const hasPlayedResultsFanfare = useRef(false);
+
+  useEffect(() => {
+    const lobbyMusic = new Audio("/audio/lobby-music.mp3");
+    lobbyMusic.loop = true;
+    lobbyMusic.volume = 0.5;
+    lobbyMusicRef.current = lobbyMusic;
+    questionRevealSoundRef.current = new Audio("/audio/question-reveal.mp3");
+    resultsFanfareRef.current = new Audio("/audio/results-fanfare.mp3");
+    return () => {
+      lobbyMusic.pause();
+    };
+  }, []);
+
+  // Stops the instant the quiz starts (first question appears) rather than
+  // running through the whole game — it's lobby/waiting-room music, not a
+  // game soundtrack.
+  useEffect(() => {
+    const lobbyMusic = lobbyMusicRef.current;
+    if (!lobbyMusic) return;
+    if (started) {
+      lobbyMusic.pause();
+    } else {
+      lobbyMusic.play().catch(() => {});
+    }
+  }, [started]);
+
+  // Browsers reject play() without a prior user gesture on the page — caught
+  // and ignored everywhere below since a missed sound effect isn't worth
+  // surfacing as an error to the host.
+  useEffect(() => {
+    if (!podium || hasPlayedResultsFanfare.current) return;
+    hasPlayedResultsFanfare.current = true;
+    resultsFanfareRef.current?.play().catch(() => {});
+  }, [podium]);
+
   // Lead-time countdown: seconds until answer choices reveal. Reuses
   // useCountdown with startedAt as the base and the lead-time gap (derived
   // from the two server timestamps) as the duration.
@@ -136,6 +180,11 @@ export function HostLobby({
       setLocked(true);
       setFrozenRemaining(liveRemainingRef.current);
       setRevealedAnswers(data.correctChoices);
+      const jingle = questionRevealSoundRef.current;
+      if (jingle) {
+        jingle.currentTime = 0;
+        jingle.play().catch(() => {});
+      }
     };
     const onLeaderboardUpdate = (message: InboundMessage) => {
       setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);

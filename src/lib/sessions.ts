@@ -197,7 +197,7 @@ export async function killLiveSessionsForQuiz(quizId: string): Promise<number> {
 }
 
 const HISTORY_SESSION_LIMIT = 10;
-const HISTORY_TOP_PLAYERS = 5;
+const HISTORY_TOP_PLAYERS = 3;
 
 export type SessionHistoryEntry = {
   sessionId: string;
@@ -209,7 +209,7 @@ export type SessionHistoryEntry = {
 
 /**
  * Past completed games for a quiz, most recent first, capped at 10 (the host
- * page's "History" panel) — each with its top-5 finishers. `results` docs
+ * page's "History" panel) — each with its top-3 finishers. `results` docs
  * only exist once a session is finalized (see finalizeSession in
  * leaderboard.ts), so this naturally excludes anything still LOBBY/ACTIVE.
  */
@@ -246,6 +246,36 @@ export async function getQuizSessionHistory(quizId: string): Promise<SessionHist
       };
     })
   );
+}
+
+export class SessionHistoryNotFoundError extends Error {
+  constructor(sessionId: string) {
+    super(`No session found with id ${sessionId}.`);
+    this.name = "SessionHistoryNotFoundError";
+  }
+}
+
+export class SessionNotCompletedError extends Error {
+  constructor(sessionId: string) {
+    super(`Session ${sessionId} hasn't finished yet — use "Kill all live sessions" instead.`);
+    this.name = "SessionNotCompletedError";
+  }
+}
+
+/**
+ * Deletes one past game from a quiz's history (the host page's per-entry
+ * "Delete" button) — only COMPLETED sessions, so this can't be used to tear
+ * down a game still in progress ("Kill all live sessions" is the path for
+ * that). recursiveDelete() removes the GameSession doc and every
+ * subcollection under it (sessionQuestions, its nested answers, players,
+ * results) in one call.
+ */
+export async function deleteCompletedSession(sessionId: string): Promise<void> {
+  const sessionRef = firestore.collection("gameSessions").doc(sessionId);
+  const snap = await sessionRef.get();
+  if (!snap.exists) throw new SessionHistoryNotFoundError(sessionId);
+  if (snap.data()!.status !== "COMPLETED") throw new SessionNotCompletedError(sessionId);
+  await firestore.recursiveDelete(sessionRef);
 }
 
 /**

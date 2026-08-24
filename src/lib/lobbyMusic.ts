@@ -15,6 +15,13 @@
  * ticks removed from that gesture and can be silently rejected — Safari
  * enforces this strictly, Chrome less so but still inconsistently for a
  * fresh domain with no prior media-engagement history.
+ *
+ * Every attempt logs to the console with a `[lobbyMusic]` prefix — this has
+ * been unreliable enough in the field (works locally, silently fails or
+ * stops in production for reasons not yet confirmed) that guessing further
+ * without an actual error/event trail from a real failing browser isn't
+ * productive. If it's not working, open DevTools' Console tab and send the
+ * `[lobbyMusic]` lines.
  */
 const BASE_VOLUME = 0.5;
 const FADE_OUT_MS = 1000;
@@ -22,13 +29,28 @@ const FADE_STEPS = 20;
 
 let audio: HTMLAudioElement | null = null;
 
+function createAudio(): HTMLAudioElement {
+  const el = new Audio("/audio/lobby-music.mp3");
+  el.loop = true;
+  el.volume = BASE_VOLUME;
+  el.addEventListener("error", () => {
+    console.warn("[lobbyMusic] element error", el.error?.code, el.error?.message);
+  });
+  el.addEventListener("stalled", () => console.warn("[lobbyMusic] stalled (network)"));
+  el.addEventListener("playing", () => console.info("[lobbyMusic] playing event fired"));
+  el.addEventListener("pause", () => console.info("[lobbyMusic] paused", new Error().stack));
+  return el;
+}
+
 export function startLobbyMusic() {
   if (!audio) {
-    audio = new Audio("/audio/lobby-music.mp3");
-    audio.loop = true;
-    audio.volume = BASE_VOLUME;
+    audio = createAudio();
   }
-  audio.play().catch(() => {});
+  console.info("[lobbyMusic] startLobbyMusic() called, readyState=", audio.readyState);
+  audio
+    .play()
+    .then(() => console.info("[lobbyMusic] play() resolved"))
+    .catch((err) => console.warn("[lobbyMusic] play() rejected:", err?.name, err?.message));
 }
 
 // Fades out over a second rather than cutting off mid-note when the quiz
@@ -45,6 +67,7 @@ export function startLobbyMusic() {
 export function stopLobbyMusic() {
   const el = audio;
   if (!el) return;
+  console.info("[lobbyMusic] stopLobbyMusic() called", new Error().stack);
   audio = null;
 
   const startVolume = el.volume;
@@ -65,5 +88,8 @@ export function stopLobbyMusic() {
  * /host/[pin] without having gone through the button above (e.g. a page
  * reload), so the synchronous-gesture play() above never happened. */
 export function retryLobbyMusicIfPaused() {
-  if (audio?.paused) audio.play().catch(() => {});
+  if (audio?.paused) {
+    console.info("[lobbyMusic] retrying on gesture");
+    audio.play().catch((err) => console.warn("[lobbyMusic] retry play() rejected:", err?.name, err?.message));
+  }
 }

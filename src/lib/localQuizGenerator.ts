@@ -69,12 +69,12 @@ import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS, DEFAULT_TIME_LIMIT_SECS } fro
 
 const DEFAULT_PRIMARY_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_FALLBACK_MODEL = "google/gemini-2.5-flash";
-// Was 4. No documented OpenRouter rate-limit tier for this key and no
-// retry/backoff on a 429 (see openrouter.ts's completeChat) — a limit this
-// hits just becomes more failed attempts, which then need more repair
-// rounds. Doubled as a first empirical step (not a guess at a magic number)
-// to see whether the key tolerates more before pushing further.
-const CONCURRENCY = 8;
+// Was 4, tested clean at 8 (82.5s for a 25-card/2-week request that took
+// 302s at 4, zero errors/warnings in Cloud Run logs during the run) — no
+// documented OpenRouter rate-limit tier for this key and no retry/backoff
+// on a 429 (see openrouter.ts's completeChat), so this is empirical, not a
+// guess, and still being pushed incrementally rather than jumping blind.
+const CONCURRENCY = 16;
 // Target share of a quiz that's true/false, the rest multiple_choice. Held
 // to an exact per-quiz quota (see assignQuestionTypes) rather than a
 // per-question coin flip — QA feedback was that quizzes were landing with

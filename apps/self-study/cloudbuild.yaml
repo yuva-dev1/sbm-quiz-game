@@ -34,6 +34,9 @@ steps:
       - --platform=managed
       - --image=$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA
       - --region=$_DEPLOY_REGION
+      # Large flashcard/quiz decks (25-35 items) can take several minutes to
+      # generate — see GENERATE_TIMEOUT_MS in server/index.js for why.
+      - --timeout=600
       - --quiet
 images:
   - $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA

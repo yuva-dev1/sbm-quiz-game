@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import bcrypt from 'bcryptjs';
@@ -18,10 +19,14 @@ const GENERATE_QUIZ_API_KEY = process.env.GENERATE_QUIZ_API_KEY || '';
 const REG_NO_LENGTH = 5;
 const MIN_PASSWORD_LENGTH = 8;
 const BCRYPT_ROUNDS = 12;
-// Matches the sibling bhagavatham-class-quiz-generator proxy's REQUEST_TIMEOUT_MS —
-// a full grounded quiz (with verification/repair passes) can take minutes, not seconds;
-// see this repo's generate-quiz/route.ts using an SSE heartbeat for the same reason.
-const GENERATE_TIMEOUT_MS = 280_000;
+// Large decks (25-35 items) can take several minutes at the generator's fixed
+// concurrency of 4 (see localQuizGenerator.ts's CONCURRENCY) — this is a
+// generous outer safety net, not the expected duration. The SSE progress
+// stream (see below) is what makes that wait tolerable/visible rather than
+// looking hung. Kept a little under the Cloud Run service's own 600s request
+// timeout (see cloudbuild.yaml's Deploy step) so this fires first with a
+// clean error instead of Cloud Run abruptly cutting the connection.
+const GENERATE_TIMEOUT_MS = 570_000;
 
 if (!SESSION_SECRET) console.warn('SELF_STUDY_SESSION_SECRET is not set — sessions will not be secure.');
 if (!process.env.SELF_STUDY_SHEETS_ENDPOINT) console.warn('SELF_STUDY_SHEETS_ENDPOINT is not set — registration and login will fail.');
@@ -106,6 +111,7 @@ app.post('/api/quiz/generate', requireSession(SESSION_SECRET), async (req, res) 
     return;
   }
 
+  const wantsStream = (req.headers.accept ?? '').includes('text/event-stream');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
   try {
@@ -114,13 +120,31 @@ app.post('/api/quiz/generate', requireSession(SESSION_SECRET), async (req, res) 
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${GENERATE_QUIZ_API_KEY}`,
-        Accept: 'application/json'
+        Accept: wantsStream ? 'text/event-stream' : 'application/json'
       },
       body: JSON.stringify({ ...req.body, mode: 'SELF_PACED' }),
       signal: controller.signal
     });
-    const payload = await upstreamResponse.json().catch(() => ({}));
-    res.status(upstreamResponse.status).json(payload);
+
+    // Piped through as-is rather than buffered with .json() — the upstream
+    // route only upgrades to an SSE stream once request validation passes
+    // (see generate-quiz/route.ts), so a validation failure still comes back
+    // as plain JSON even when the client asked to stream. Letting the client
+    // branch on content-type (like the host's own GenerateQuizForm.tsx does)
+    // keeps this proxy from having to duplicate that logic.
+    res.status(upstreamResponse.status);
+    const contentType = upstreamResponse.headers.get('content-type');
+    if (contentType) res.setHeader('Content-Type', contentType);
+    if (contentType?.includes('text/event-stream')) {
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('X-Accel-Buffering', 'no');
+    }
+
+    if (upstreamResponse.body) {
+      Readable.fromWeb(upstreamResponse.body).pipe(res);
+    } else {
+      res.end();
+    }
   } catch (error) {
     const timedOut = error?.name === 'AbortError';
     console.error('quiz generation proxy error:', error);

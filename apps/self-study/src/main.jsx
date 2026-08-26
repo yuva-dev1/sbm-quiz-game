@@ -27,6 +27,7 @@ import SourceReading from './SourceReading.jsx';
 import AuthGate from './auth.jsx';
 import { OFFICIAL_GOD_LOGO_URL } from './brandAssets.js';
 import { getWeekDisplayLabel, getWeekName } from './courseResources.js';
+import { generateWithProgress } from './generateClient.js';
 
 const API_URL = '/api/quiz/generate';
 const ATTEMPTS_API_URL = '/api/quiz/attempts';
@@ -38,7 +39,9 @@ const FALLBACK_CATALOG = {
     { id: 'week-2', label: 'Week 2', topics: ['Prasthana Traya', 'Upanishads', 'Srimad Bhagavad Gita', 'Brahma Sutras', 'Srimad Bhagavatam as the essence of all three pillars', 'Srimad Bhagavatam Mahatmyam'] },
     { id: 'week-3', label: 'Week 3', topics: ['Dharma', 'Tattva', 'Rasa', 'Essence of all Shastras by Canto', 'Four Major Puranas', 'Four Episodes of Its Greatness', 'Parikshit and the Nectar', 'Narada and Bhakti Devi', 'Atmadeva'] },
     { id: 'week-4', label: 'Week 4', topics: ['Purana', 'Mahatmyam', 'Structure of Srimad Bhagavatam', 'Lineage of Transmission', 'Speakers and Listeners', 'The Story of Atmadeva', 'Srimad Bhagavatam Mahatmyam'] },
-    { id: 'week-5', label: 'Week 5', topics: ['Three Types of Samhitas', 'Meaning and Characteristics of a Purana', 'Srimad Bhagavatam as a Mahapurana', 'Ten Lakshanas of Srimad Bhagavatam', 'Ashraya as the Main Subject', 'Cantos and Lakshanas', 'Canto 1 - Speakers and Listeners', 'Outline and Highlights of Canto 1', 'Six Questions of Shaunaka Rishis'] }
+    { id: 'week-5', label: 'Week 5', topics: ['Three Types of Samhitas', 'Meaning and Characteristics of a Purana', 'Srimad Bhagavatam as a Mahapurana', 'Ten Lakshanas of Srimad Bhagavatam', 'Ashraya as the Main Subject', 'Cantos and Lakshanas', 'Canto 1 - Speakers and Listeners', 'Outline and Highlights of Canto 1', 'Six Questions of Shaunaka Rishis'] },
+    { id: 'week-6', label: 'Week 6', topics: ['Suta Pauranika on True Dharma and Devotion', "Shaunaka Rishi's Four Further Questions", "Sage Vyasa's Birth and Restlessness", "Sage Narada's Arrival and Advice to Vyasa", "Sage Vyasa's Samadhi Vision and Composing Srimad Bhagavatam"] },
+    { id: 'week-7', label: 'Week 7', topics: ["Ashwatthama's Revenge and Arjuna Sparing His Life", "Kunti's Stuti After Krishna Protects the Unborn Parikshith", "Bhishmacharya's Final Teachings and Bhishma Stuti", "Parikshith's Birth, Horoscope, and Naming", 'The Four Legs of Dharma: Tapas, Shaucham, Daya, Satyam'] }
   ]
 };
 
@@ -155,7 +158,13 @@ function StepRail({ activeStep }) {
   );
 }
 
-function QuizForm({ weeks, coverageMode, setCoverageMode, selectedWeekIds, setSelectedWeekIds, selectedTopic, setSelectedTopic, questionCount, setQuestionCount, difficulty, setDifficulty, onGenerate, isGenerating, generationSeconds }) {
+function formatGenerationProgress(progress) {
+  if (!progress) return 'Starting...';
+  const phaseLabel = progress.phase === 'repairing' ? 'Refining' : progress.phase === 'validating' ? 'Checking' : 'Drafting';
+  return `${phaseLabel} ${progress.completed} of ${progress.total}...`;
+}
+
+function QuizForm({ weeks, coverageMode, setCoverageMode, selectedWeekIds, setSelectedWeekIds, selectedTopic, setSelectedTopic, questionCount, setQuestionCount, difficulty, setDifficulty, onGenerate, isGenerating, generationProgress }) {
   const selectedWeeks = weeks.filter((week) => selectedWeekIds.includes(week.id));
   const selectedWeek = selectedWeeks[0] || weeks[0];
   const topics = [...new Set(selectedWeeks.flatMap((week) => week.topics || []))];
@@ -273,7 +282,7 @@ function QuizForm({ weeks, coverageMode, setCoverageMode, selectedWeekIds, setSe
       </div>
 
       <button className="primary-button generate-button" type="button" onClick={onGenerate} disabled={isGenerating || selectedWeekIds.length === 0 || !selectedTopic}>
-        {isGenerating ? <><LoaderCircle className="spin" size={18} /> Building your quiz... {generationSeconds}s</> : <><Sparkles size={18} /> Generate quiz <ArrowRight size={17} /></>}
+        {isGenerating ? <><LoaderCircle className="spin" size={18} /> {formatGenerationProgress(generationProgress)}</> : <><Sparkles size={18} /> Generate quiz <ArrowRight size={17} /></>}
       </button>
       {isGenerating && <p className="generation-timing" role="status">Grounded generation can take a couple of minutes — this stays open while it works.</p>}
     </section>
@@ -532,7 +541,7 @@ function App({ mode = 'quiz', onModeChange = () => {}, regNo, onLogout }) {
   const [difficulty, setDifficulty] = useState('Mixed');
   const [questions, setQuestions] = useState(demoQuestions);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generationSeconds, setGenerationSeconds] = useState(0);
+  const [generationProgress, setGenerationProgress] = useState(null);
   const [isTakingQuiz, setIsTakingQuiz] = useState(false);
   const [responses, setResponses] = useState({});
   const [grading, setGrading] = useState(null);
@@ -550,18 +559,6 @@ function App({ mode = 'quiz', onModeChange = () => {}, regNo, onLogout }) {
       .then((nextCatalog) => setCatalog(nextCatalog))
       .catch(() => setCatalog(FALLBACK_CATALOG));
   }, []);
-
-  useEffect(() => {
-    if (!isGenerating) {
-      setGenerationSeconds(0);
-      return undefined;
-    }
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      setGenerationSeconds(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [isGenerating]);
 
   const selectedWeeks = catalog.weeks.filter((week) => selectedWeekIds.includes(week.id));
   const activeWeek = selectedWeeks[0] || catalog.weeks[0];
@@ -588,6 +585,7 @@ function App({ mode = 'quiz', onModeChange = () => {}, regNo, onLogout }) {
     if (!activeWeek || !selectedTopic) return;
     setIsGenerating(true);
     setNotice('');
+    setGenerationProgress(null);
     const payload = {
       weekIds: selectedWeekIds,
       topics: selectedTopic === ALL_TOPICS ? [] : [selectedTopic],
@@ -595,14 +593,10 @@ function App({ mode = 'quiz', onModeChange = () => {}, regNo, onLogout }) {
       difficulty: DIFFICULTY_MAP[difficulty]
     };
     try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(280_000)
+      const result = await generateWithProgress(payload, {
+        onProgress: setGenerationProgress,
+        signal: AbortSignal.timeout(600_000)
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || `Quiz API returned ${response.status}`);
       const generatedQuestions = normalizeGeneratedQuestions(result, difficulty);
       if (generatedQuestions.length === 0) throw new Error('The API returned no quiz questions.');
       setQuestions(generatedQuestions);
@@ -618,6 +612,7 @@ function App({ mode = 'quiz', onModeChange = () => {}, regNo, onLogout }) {
       setNotice(`Quiz generation failed: ${message} The previous quiz has been preserved.`);
     } finally {
       setIsGenerating(false);
+      setGenerationProgress(null);
     }
   };
 
@@ -727,7 +722,7 @@ function App({ mode = 'quiz', onModeChange = () => {}, regNo, onLogout }) {
           </nav>
           {view === 'compose' ? (
             <div className="workspace-grid">
-              <QuizForm weeks={catalog.weeks} coverageMode={coverageMode} setCoverageMode={setCoverageMode} selectedWeekIds={selectedWeekIds} setSelectedWeekIds={setSelectedWeekIds} selectedTopic={selectedTopic} setSelectedTopic={setSelectedTopic} questionCount={questionCount} setQuestionCount={setQuestionCount} difficulty={difficulty} setDifficulty={setDifficulty} onGenerate={generate} isGenerating={isGenerating} generationSeconds={generationSeconds} />
+              <QuizForm weeks={catalog.weeks} coverageMode={coverageMode} setCoverageMode={setCoverageMode} selectedWeekIds={selectedWeekIds} setSelectedWeekIds={setSelectedWeekIds} selectedTopic={selectedTopic} setSelectedTopic={setSelectedTopic} questionCount={questionCount} setQuestionCount={setQuestionCount} difficulty={difficulty} setDifficulty={setDifficulty} onGenerate={generate} isGenerating={isGenerating} generationProgress={generationProgress} />
               <PreviewPanel questions={questions} onGenerate={generate} isGenerating={isGenerating} contextLabel={contextLabel} isTakingQuiz={isTakingQuiz} onStartQuiz={startQuiz} onExitQuiz={exitQuiz} responses={responses} onChangeResponse={updateResponse} onSubmitQuiz={submitQuiz} grading={grading} onRetake={retakeQuiz} submitError={submitError} />
             </div>
           ) : selectedAttempt ? (

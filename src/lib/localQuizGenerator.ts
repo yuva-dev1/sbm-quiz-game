@@ -119,10 +119,17 @@ const MAX_FILL_ROUNDS = 5;
 // climb past 15, and a request that genuinely needed several of those
 // rounds took several minutes end to end. This trades a small amount of
 // fill-completeness on very broad, stubborn requests for a hard ceiling on
-// worst-case latency — with CONCURRENCY workers per round, this bounds a
-// generation to roughly MAX_ROUNDS_CEILING x (slowest slot's latency)
-// regardless of topic breadth.
-const MAX_ROUNDS_CEILING = 8;
+// worst-case latency.
+//
+// Rounds run strictly sequentially — round N+1 can't start until round N's
+// full worker pool finishes and the cross-round duplicate sweep runs — so
+// unlike the per-round fill itself, this ceiling isn't sped up by
+// CONCURRENCY at all. Tested at 8: with CONCURRENCY=16, a 25-card/2-week
+// request's *draft* pass alone (round 0) reached 19-23 of 25 in under 20s,
+// but needing the full repair-round budget still pushed total time past
+// 100s. Tightened to 3 (draft + 2 repair passes) specifically to bound
+// wall-clock time, not just eventual fill-completeness.
+const MAX_ROUNDS_CEILING = 3;
 
 export type GeneratedQuestion = {
   id: string;

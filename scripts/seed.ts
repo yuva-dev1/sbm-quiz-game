@@ -7,6 +7,7 @@ async function main() {
   const quiz = await createQuiz({
     title: "Srimad Bhagavatam: Canto 1 Basics",
     description: "A sample warm-up quiz for testing the live game flow.",
+    weekIds: ["week-1"],
     questions: [
       {
         order: 0,

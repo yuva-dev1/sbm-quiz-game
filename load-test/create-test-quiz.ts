@@ -38,6 +38,7 @@ async function main() {
     title: TITLE,
     description: "Throwaway quiz for the 500-600 bot production load test. Safe to delete after the run.",
     status: "PUBLISHED",
+    weekIds: [],
     questions,
   });
 

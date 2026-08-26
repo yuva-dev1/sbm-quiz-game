@@ -29,13 +29,17 @@ type NewQuestionInput = {
  * Every Question doc also gets a `quizCreatedAt` copy of the parent's
  * `createdAt` (both set from the same in-memory value, never two separate
  * `serverTimestamp()` calls) so generateQuizRequest.ts's
- * collectionGroup("questions") dedup query can order by it without a join.
+ * collectionGroup("questions") dedup query can order by it without a join —
+ * and a `weekIds` copy of the parent's `weekIds` so that same query can
+ * scope its avoid-list to the relevant week(s) instead of the whole app's
+ * recent history.
  */
 export async function createQuiz(input: {
   title: string;
   description: string;
   status?: "DRAFT" | "PUBLISHED";
   mode?: "LIVE" | "SELF_PACED";
+  weekIds: string[];
   questions: NewQuestionInput[];
 }) {
   const createdAt = new Date();
@@ -50,6 +54,7 @@ export async function createQuiz(input: {
     createdAt,
     updatedAt: createdAt,
     mode,
+    weekIds: input.weekIds,
     slug: null,
     responsesOpen: false,
     opensAt: null,
@@ -64,7 +69,7 @@ export async function createQuiz(input: {
   const batch = firestore.batch();
   const questions = input.questions.map((question) => {
     const ref = questionsRef.doc();
-    batch.set(ref, { ...question, quizCreatedAt: createdAt });
+    batch.set(ref, { ...question, quizCreatedAt: createdAt, weekIds: input.weekIds });
     return { id: ref.id, ...question };
   });
   await batch.commit();

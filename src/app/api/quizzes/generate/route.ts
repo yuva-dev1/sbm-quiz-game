@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return Response.json({ error: parsed.error }, { status: parsed.status });
   }
-  const { questionCount, difficulty, mode, scopeTopics, coverageLabel, sourceText, existingQuestions } = parsed.value;
+  const { questionCount, difficulty, mode, weekIds, scopeTopics, coverageLabel, sourceText, existingQuestions } = parsed.value;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -40,6 +40,7 @@ export async function POST(request: Request) {
           title: generated.title,
           description: generated.description,
           mode,
+          weekIds,
           questions: generated.questions.map((question, index) => ({
             order: index,
             type: question.type === "true_false" ? ("TRUE_FALSE" as const) : ("MULTIPLE_CHOICE" as const),

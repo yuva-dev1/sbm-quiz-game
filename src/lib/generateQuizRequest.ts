@@ -87,11 +87,22 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
   // "Most recent quizzes first" was a join on the parent Quiz's createdAt in
   // Prisma — Firestore collection-group queries can't join, so each
   // Question doc carries a denormalized quizCreatedAt field (set wherever
-  // Question docs are created — see src/app/api/quizzes/route.ts and
-  // .../generate/route.ts) specifically so this query can order by it
+  // Question docs are created — see src/app/api/quizzes/[id]/questions/route.ts
+  // and .../generate/route.ts) specifically so this query can order by it
   // directly.
+  //
+  // Scoped to the requested week(s) via a same denormalized-onto-Question-doc
+  // trick (weekIds, copied from the parent Quiz) — unscoped, this pulled the
+  // 150 most recent questions from *any* quiz on *any* week, which stopped
+  // being useful signal as the corpus grew and made findDuplicate burn
+  // retries "avoiding" facts from completely unrelated material instead of
+  // the ones actually likely to repeat. Quiz/Question docs written before
+  // this field existed simply have no weekIds and never match — no backfill
+  // needed, the avoid-list just fills back in naturally as new quizzes on a
+  // week accumulate.
   const existingQuestionsSnap = await firestore
     .collectionGroup("questions")
+    .where("weekIds", "array-contains-any", weekIds)
     .where("type", "in", ["MULTIPLE_CHOICE", "TRUE_FALSE"])
     .orderBy("quizCreatedAt", "desc")
     .limit(MAX_EXISTING_QUESTIONS_FOR_DEDUP)

@@ -77,6 +77,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       explanation: "",
       timeLimitSecs,
       quizCreatedAt: quiz.createdAt,
+      weekIds: quiz.weekIds ?? [],
     };
     tx.set(ref, data);
     return { id: ref.id, ...data };

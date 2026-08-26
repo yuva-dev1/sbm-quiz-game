@@ -21,6 +21,7 @@
       "collectionGroup": "questions",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
+        { "fieldPath": "weekIds", "arrayConfig": "CONTAINS" },
         { "fieldPath": "type", "order": "ASCENDING" },
         { "fieldPath": "quizCreatedAt", "order": "DESCENDING" }
       ]

@@ -158,10 +158,18 @@ function StepRail({ activeStep }) {
   );
 }
 
+// Matches the host app's own progressLabel() in GenerateQuizForm.tsx — the
+// "completed of total" count only ever climbs steadily during the initial
+// draft pass. Repair rounds fill, invalidate, and refill slots as duplicates
+// turn up (see localQuizGenerator.ts's generateQuiz), so showing that same
+// number during "repairing" looks like it's stuck in a loop even though it's
+// real, bounded work; a static message during that phase reads as calm
+// instead of broken, same as the host UI already does.
 function formatGenerationProgress(progress) {
   if (!progress) return 'Starting...';
-  const phaseLabel = progress.phase === 'repairing' ? 'Refining' : progress.phase === 'validating' ? 'Checking' : 'Drafting';
-  return `${phaseLabel} ${progress.completed} of ${progress.total}...`;
+  if (progress.phase === 'draft') return `Drafting ${progress.completed} of ${progress.total}...`;
+  if (progress.phase === 'repairing') return 'Fixing up a few questions...';
+  return 'Double-checking against the source material...';
 }
 
 function QuizForm({ weeks, coverageMode, setCoverageMode, selectedWeekIds, setSelectedWeekIds, selectedTopic, setSelectedTopic, questionCount, setQuestionCount, difficulty, setDifficulty, onGenerate, isGenerating, generationProgress }) {

@@ -29,13 +29,6 @@ export async function generateWithProgress(payload, { onProgress, signal } = {})
   const decoder = new TextDecoder();
   let buffer = '';
   let result = null;
-  // The generator's own completed-count can legitimately dip mid-run — a
-  // duplicate-detection sweep between repair rounds nulls out slots that
-  // looked filled a moment ago, then re-fills them in the next round (see
-  // localQuizGenerator.ts's generateQuiz). That's real and bounded, but
-  // showing the raw number regress reads as "stuck in a loop," so this only
-  // ever displays the high-water mark rather than the raw value.
-  let highestCompleted = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -49,8 +42,7 @@ export async function generateWithProgress(payload, { onProgress, signal } = {})
       if (!parsed) continue; // heartbeat comment
 
       if (parsed.event === 'progress') {
-        highestCompleted = Math.max(highestCompleted, parsed.data?.completed ?? 0);
-        onProgress?.({ ...parsed.data, completed: highestCompleted });
+        onProgress?.(parsed.data);
       } else if (parsed.event === 'complete') {
         result = parsed.data;
       } else if (parsed.event === 'error') {

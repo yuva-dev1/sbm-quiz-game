@@ -29,11 +29,16 @@ import { generateWithProgress } from './generateClient.js';
 const SETS_API_URL = '/api/flashcards/sets';
 const ALL_TOPICS = '__all_topics__';
 
+// Matches the host app's own progressLabel() in GenerateQuizForm.tsx — see
+// main.jsx's copy of this function for why repair rounds get a static
+// message instead of live numbers.
 function formatGenerationProgress(progress) {
   if (!progress) return 'Starting...';
-  const phaseLabel = progress.phase === 'repairing' ? 'Refining' : progress.phase === 'validating' ? 'Checking' : 'Drafting';
-  return `${phaseLabel} ${progress.completed} of ${progress.total}...`;
+  if (progress.phase === 'draft') return `Drafting ${progress.completed} of ${progress.total}...`;
+  if (progress.phase === 'repairing') return 'Fixing up a few cards...';
+  return 'Double-checking against the source material...';
 }
+
 const CARD_COUNTS = [5, 8, 10, 15, 20, 25, 30];
 const FALLBACK_CATALOG = {
   weeks: [

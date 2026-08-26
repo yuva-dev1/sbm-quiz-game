@@ -108,6 +108,16 @@ const MAX_SOURCE_TEXT_CHARS = 150_000;
 // requested question count, especially for smaller quizzes where a single
 // dropped slot is a visible fraction of the total.
 const MAX_FILL_ROUNDS = 5;
+// Upper bound on maxRounds below, regardless of how many topics are in
+// scope. Without this, a broad multi-week "all topics" request (each week
+// contributes 6-9 topics — two weeks routinely means 15+) let maxRounds
+// climb past 15, and a request that genuinely needed several of those
+// rounds took several minutes end to end. This trades a small amount of
+// fill-completeness on very broad, stubborn requests for a hard ceiling on
+// worst-case latency — with CONCURRENCY workers per round, this bounds a
+// generation to roughly MAX_ROUNDS_CEILING x (slowest slot's latency)
+// regardless of topic breadth.
+const MAX_ROUNDS_CEILING = 8;
 
 export type GeneratedQuestion = {
   id: string;
@@ -961,8 +971,10 @@ export async function generateQuiz(params: {
 
   // At least one round per topic, so a stuck slot's rotation (above) gets a
   // shot at every topic before this gives up on it, not just whichever
-  // number of topics the flat MAX_FILL_ROUNDS floor happens to cover.
-  const maxRounds = Math.max(MAX_FILL_ROUNDS, shuffledTopics.length);
+  // number of topics the flat MAX_FILL_ROUNDS floor happens to cover —
+  // capped at MAX_ROUNDS_CEILING so a broad topic selection can't push
+  // worst-case latency arbitrarily high (see that constant's comment).
+  const maxRounds = Math.min(Math.max(MAX_FILL_ROUNDS, shuffledTopics.length), MAX_ROUNDS_CEILING);
   // A slot's assigned type is fixed for its first couple of rounds so the
   // requested true/false ratio holds in the common case, but a slot that's
   // still empty after that gets its type flipped (once) rather than kept

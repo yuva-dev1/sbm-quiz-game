@@ -380,7 +380,7 @@
 .study-card-back .card-face-top { color: rgba(255, 255, 255, .6); }
 .card-category { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px; color: var(--brand); background: rgba(46, 49, 146, .07); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .card-category.answer { color: var(--gold); background: rgba(255, 255, 255, .1); }
-.card-prompt, .card-answer { max-width: 650px; font-family: 'Cormorant Garamond', Georgia, serif; font-size: clamp(2.2rem, 4.4vw, 3.6rem); font-weight: 600; line-height: 1.05; text-align: center; text-wrap: balance; }
+.card-prompt, .card-answer { max-width: 650px; max-height: 100%; min-height: 0; overflow-y: auto; font-family: 'Cormorant Garamond', Georgia, serif; font-size: clamp(2.2rem, 4.4vw, 3.6rem); font-weight: 600; line-height: 1.05; text-align: center; text-wrap: balance; }
 .card-answer { color: white; font-size: clamp(2rem, 4vw, 3.25rem); }
 .card-detail { max-width: 610px; margin-top: 22px; color: rgba(255, 255, 255, .73); font-size: 14px; line-height: 1.5; text-align: center; }
 .flip-hint { position: absolute; bottom: 24px; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 11px; font-weight: 700; }

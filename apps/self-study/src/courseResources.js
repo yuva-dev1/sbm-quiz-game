@@ -7,7 +7,9 @@ export const WEEK_NAMES = {
   'week-2': 'The Glory of the Bhagavatam',
   'week-3': 'Four Stories of the Mahatmyam',
   'week-4': 'Atmadeva and the Lineage',
-  'week-5': 'Canto One Begins'
+  'week-5': 'Canto One Begins',
+  'week-6': "Narada's Counsel & Vyasa's Composition",
+  'week-7': "Parikshit's Birth & Dharma Restored"
 };
 
 export function getWeekName(weekId) {

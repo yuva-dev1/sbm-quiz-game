@@ -24,10 +24,16 @@ import SelfStudyHeader from './selfStudyHeader.jsx';
 import SourceReading from './SourceReading.jsx';
 import { OFFICIAL_GOD_LOGO_URL } from './brandAssets.js';
 import { getWeekDisplayLabel, getWeekName } from './courseResources.js';
+import { generateWithProgress } from './generateClient.js';
 
-const API_URL = '/api/quiz/generate';
 const SETS_API_URL = '/api/flashcards/sets';
 const ALL_TOPICS = '__all_topics__';
+
+function formatGenerationProgress(progress) {
+  if (!progress) return 'Starting...';
+  const phaseLabel = progress.phase === 'repairing' ? 'Refining' : progress.phase === 'validating' ? 'Checking' : 'Drafting';
+  return `${phaseLabel} ${progress.completed} of ${progress.total}...`;
+}
 const CARD_COUNTS = [5, 8, 10, 15, 20, 25, 30];
 const FALLBACK_CATALOG = {
   weeks: [
@@ -35,7 +41,9 @@ const FALLBACK_CATALOG = {
     { id: 'week-2', label: 'Week 2', topics: ['Prasthana Traya', 'Upanishads', 'Srimad Bhagavad Gita', 'Brahma Sutras', 'Srimad Bhagavatam as the essence of all three pillars', 'Srimad Bhagavatam Mahatmyam'] },
     { id: 'week-3', label: 'Week 3', topics: ['Dharma', 'Tattva', 'Rasa', 'Essence of all Shastras by Canto', 'Four Major Puranas', 'Four Episodes of Its Greatness', 'Parikshit and the Nectar', 'Narada and Bhakti Devi', 'Atmadeva'] },
     { id: 'week-4', label: 'Week 4', topics: ['Purana', 'Mahatmyam', 'Structure of Srimad Bhagavatam', 'Lineage of Transmission', 'Speakers and Listeners', 'The Story of Atmadeva'] },
-    { id: 'week-5', label: 'Week 5', topics: ['Three Types of Samhitas', 'Meaning and Characteristics of a Purana', 'Srimad Bhagavatam as a Mahapurana', 'Ten Lakshanas of Srimad Bhagavatam', 'Ashraya as the Main Subject', 'Cantos and Lakshanas', 'Canto 1 - Speakers and Listeners', 'Outline and Highlights of Canto 1', 'Six Questions of Shaunaka Rishis'] }
+    { id: 'week-5', label: 'Week 5', topics: ['Three Types of Samhitas', 'Meaning and Characteristics of a Purana', 'Srimad Bhagavatam as a Mahapurana', 'Ten Lakshanas of Srimad Bhagavatam', 'Ashraya as the Main Subject', 'Cantos and Lakshanas', 'Canto 1 - Speakers and Listeners', 'Outline and Highlights of Canto 1', 'Six Questions of Shaunaka Rishis'] },
+    { id: 'week-6', label: 'Week 6', topics: ['Suta Pauranika on True Dharma and Devotion', "Shaunaka Rishi's Four Further Questions", "Sage Vyasa's Birth and Restlessness", "Sage Narada's Arrival and Advice to Vyasa", "Sage Vyasa's Samadhi Vision and Composing Srimad Bhagavatam"] },
+    { id: 'week-7', label: 'Week 7', topics: ["Ashwatthama's Revenge and Arjuna Sparing His Life", "Kunti's Stuti After Krishna Protects the Unborn Parikshith", "Bhishmacharya's Final Teachings and Bhishma Stuti", "Parikshith's Birth, Horoscope, and Naming", 'The Four Legs of Dharma: Tapas, Shaucham, Daya, Satyam'] }
   ]
 };
 
@@ -110,7 +118,8 @@ function WeekAndTopicForm({
   cardCount,
   setCardCount,
   onGenerate,
-  isGenerating
+  isGenerating,
+  generationProgress
 }) {
   const selectedWeeks = weeks.filter((week) => selectedWeekIds.includes(week.id));
   const availableTopics = [...new Set(selectedWeeks.flatMap((week) => week.topics || []))];
@@ -210,8 +219,9 @@ function WeekAndTopicForm({
       </div>
 
       <button className="primary-button generate-button flashcard-generate" type="button" onClick={onGenerate} disabled={isGenerating || !selectedWeekIds.length}>
-        {isGenerating ? <><LoaderCircle className="spin" size={18} /> Building your deck...</> : <><Sparkles size={18} /> Generate flashcards <ArrowRight size={17} /></>}
+        {isGenerating ? <><LoaderCircle className="spin" size={18} /> {formatGenerationProgress(generationProgress)}</> : <><Sparkles size={18} /> Generate flashcards <ArrowRight size={17} /></>}
       </button>
+      {isGenerating && <p className="generation-timing" role="status">Larger decks can take a few minutes — this stays open while it works.</p>}
       <p className="source-helper"><BookOpen size={14} /> Grounded in the indexed class notes for the selected week{selectedWeekIds.length > 1 ? 's' : ''}.</p>
     </section>
   );
@@ -429,6 +439,7 @@ export default function FlashcardsApp({ mode = 'flashcards', onModeChange = () =
   const [cardCount, setCardCount] = useState('25');
   const [cards, setCards] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(null);
   const [notice, setNotice] = useState('');
   const [saveState, setSaveState] = useState('idle');
   const [view, setView] = useState('generate');
@@ -468,20 +479,17 @@ export default function FlashcardsApp({ mode = 'flashcards', onModeChange = () =
     setIsGenerating(true);
     setNotice('');
     setSaveState('idle');
+    setGenerationProgress(null);
     try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          weekIds: selectedWeekIds,
-          topics: selectedTopics,
-          questionCount: Number(cardCount),
-          difficulty: 'mixed'
-        }),
-        signal: AbortSignal.timeout(280_000)
+      const result = await generateWithProgress({
+        weekIds: selectedWeekIds,
+        topics: selectedTopics,
+        questionCount: Number(cardCount),
+        difficulty: 'mixed'
+      }, {
+        onProgress: setGenerationProgress,
+        signal: AbortSignal.timeout(600_000)
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || `Flashcard service returned ${response.status}.`);
       const deck = normalizeCards(result);
       if (!deck.length) throw new Error('The API returned no flashcards.');
       setCards(deck);
@@ -491,6 +499,7 @@ export default function FlashcardsApp({ mode = 'flashcards', onModeChange = () =
       setNotice(`Flashcard generation failed: ${message}${cards.length ? ' Your previous deck has been preserved.' : ''}`);
     } finally {
       setIsGenerating(false);
+      setGenerationProgress(null);
     }
   };
 
@@ -580,6 +589,7 @@ export default function FlashcardsApp({ mode = 'flashcards', onModeChange = () =
               setCardCount={setCardCount}
               onGenerate={generate}
               isGenerating={isGenerating}
+              generationProgress={generationProgress}
             />
             <DeckViewer cards={cards} contextLabel={contextLabel} onRegenerate={generate} isGenerating={isGenerating} onSave={cards.length ? saveCurrentSet : undefined} saveState={saveState} />
           </section>

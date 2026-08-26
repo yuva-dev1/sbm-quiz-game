@@ -69,7 +69,12 @@ import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS, DEFAULT_TIME_LIMIT_SECS } fro
 
 const DEFAULT_PRIMARY_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_FALLBACK_MODEL = "google/gemini-2.5-flash";
-const CONCURRENCY = 4;
+// Was 4. No documented OpenRouter rate-limit tier for this key and no
+// retry/backoff on a 429 (see openrouter.ts's completeChat) — a limit this
+// hits just becomes more failed attempts, which then need more repair
+// rounds. Doubled as a first empirical step (not a guess at a magic number)
+// to see whether the key tolerates more before pushing further.
+const CONCURRENCY = 8;
 // Target share of a quiz that's true/false, the rest multiple_choice. Held
 // to an exact per-quiz quota (see assignQuestionTypes) rather than a
 // per-question coin flip — QA feedback was that quizzes were landing with

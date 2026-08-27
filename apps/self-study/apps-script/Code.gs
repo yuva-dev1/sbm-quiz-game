@@ -8,12 +8,15 @@
  * URL doesn't change.
  *
  * Script Properties (Project Settings > Script Properties):
- *   API_KEY   — shared secret, matches SELF_STUDY_SHEETS_ENDPOINT.apiKey (unchanged).
- *   APP_URL   — public URL of the self-study app, used to build reset links,
- *               e.g. https://bhagavatham-self-study-876193044983.us-central1.run.app
+ *   API_KEY       — shared secret, matches SELF_STUDY_SHEETS_ENDPOINT.apiKey (unchanged).
+ *   APP_URL       — public URL of the self-study app, used to build reset links,
+ *                   e.g. https://bhagavatham-self-study-876193044983.us-central1.run.app
+ *   LOGO_URL      — (optional) image URL for the GOD logo in the email footer.
+ *                   Defaults to DEFAULT_LOGO_URL below.
+ *   CONTACT_EMAIL — (optional) shown as a "Questions?" line in the email footer.
  *
- * After pasting, run authorize() once from the editor to grant the new mail
- * scope (MailApp), then redeploy.
+ * After pasting, run authorize() once from the editor to grant the mail +
+ * external-request scopes (MailApp, UrlFetchApp), then redeploy.
  *
  * Sheet tabs are created automatically the first time they're needed:
  * Users, QuizAttempts, FlashcardSets. The Users tab must be recreated with the
@@ -26,9 +29,17 @@ const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const USERS_HEADERS = ['RegNo', 'Email', 'PasswordHash', 'CreatedAt', 'ResetTokenHash', 'ResetTokenExpiresAt'];
 
-/** Run once from the editor after pasting, to authorize the MailApp scope. */
+// Email theme — pulled from the self-study app's own brand tokens.
+const BRAND_INDIGO = '#2E3192';
+const BRAND_INK = '#20255D';
+const BRAND_GOLD = '#99610B';
+const DEFAULT_LOGO_URL = 'https://godivinity.org/wp-content/uploads/2018/05/GOD-LOGO-1024x617.jpg';
+
+/** Run once from the editor after pasting, to surface the OAuth consent screen
+ *  for the MailApp (send email) and UrlFetchApp (fetch logo) scopes. */
 function authorize() {
   MailApp.getRemainingDailyQuota();
+  UrlFetchApp.fetch(DEFAULT_LOGO_URL, { muteHttpExceptions: true });
 }
 
 function doPost(e) {
@@ -200,19 +211,95 @@ function sha256Hex(str) {
 }
 
 function sendResetEmail(email, regNo, token) {
-  const appUrl = String(PropertiesService.getScriptProperties().getProperty('APP_URL') || '').replace(/\/+$/, '');
+  const props = PropertiesService.getScriptProperties();
+  const appUrl = String(props.getProperty('APP_URL') || '').replace(/\/+$/, '');
   const link = appUrl + '/?token=' + encodeURIComponent(token) + '&reg=' + encodeURIComponent(regNo);
-  const body =
-    'Namaste,\n\n' +
-    'We received a request to reset the password for registration number ' + regNo + ' on Bhagavatam Self Study.\n\n' +
-    'Open this link to choose a new password (valid for 1 hour):\n' +
-    link + '\n\n' +
-    'If you did not request this, you can safely ignore this email — your password will not change.\n\n' +
-    'Radhe Radhe';
-  MailApp.sendEmail({
+  const contactEmail = props.getProperty('CONTACT_EMAIL') || '';
+  const safeRegNo = escapeHtml_(regNo);
+  const logoBlob = getLogoBlob_();
+
+  const plainBody =
+    'Radhe Radhe,\n\n' +
+    'We received a request to reset the password for registration number ' + regNo +
+    ' on Bhagavatam Self Study.\n\n' +
+    'Open this link to choose a new password (valid for 1 hour):\n' + link + '\n\n' +
+    'If you did not request this, you can safely ignore this email - your password will not change.\n\n' +
+    (contactEmail ? 'Questions? ' + contactEmail + '\n\n' : '') +
+    'Global Organization of Divinity';
+
+  const htmlBody =
+    '<div style="margin:0;padding:24px 12px;background:#f4f2ec;">' +
+      '<div style="font-family:Georgia,\'Times New Roman\',serif;max-width:560px;margin:0 auto;background:#ffffff;' +
+        'border:2px solid ' + BRAND_INDIGO + ';border-radius:16px;overflow:hidden;">' +
+
+        '<div style="background:' + BRAND_INDIGO + ';padding:26px 30px;text-align:center;color:#ffffff;">' +
+          '<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:.01em;">Reset your password</h1>' +
+          '<p style="margin:7px 0 0;font-size:11px;color:#c9cbe8;letter-spacing:.22em;text-transform:uppercase;">' +
+            'Bhagavatam Self Study</p>' +
+        '</div>' +
+
+        '<div style="padding:32px 34px;color:#2c3e50;font-size:15px;line-height:1.65;">' +
+          '<p style="margin:0 0 14px;">Radhe Radhe,</p>' +
+          '<p style="margin:0 0 24px;">We received a request to reset the password for registration number ' +
+            '<strong style="color:' + BRAND_INK + ';">' + safeRegNo + '</strong>.</p>' +
+
+          '<div style="text-align:center;margin:24px 0;">' +
+            '<a href="' + link + '" style="display:inline-block;background:' + BRAND_INDIGO + ';color:#ffffff;' +
+              'text-decoration:none;font-family:Georgia,serif;font-size:15px;font-weight:600;padding:13px 34px;' +
+              'border-radius:8px;">Choose a new password</a>' +
+          '</div>' +
+
+          '<p style="margin:0 0 6px;font-size:12px;color:#8a8f98;text-align:center;">' +
+            'This link is valid for one hour. If the button doesn\'t work, paste this link into your browser:</p>' +
+          '<p style="margin:0 0 6px;font-size:12px;text-align:center;word-break:break-all;">' +
+            '<span style="color:' + BRAND_INDIGO + ';">' + link + '</span></p>' +
+
+          '<div style="margin:24px 0 0;padding:14px 16px;background:#fffdf2;border-left:4px solid ' + BRAND_GOLD + ';' +
+            'font-size:13px;color:#5b4a1e;">' +
+            'If you did not request this, you can safely ignore this email &mdash; your password will not change.</div>' +
+
+          '<div style="margin-top:30px;border-top:1px solid #ecebe3;padding-top:22px;text-align:center;">' +
+            (contactEmail
+              ? '<p style="margin:0 0 12px;font-size:13px;color:#8a8f98;">Questions? ' +
+                  '<a href="mailto:' + contactEmail + '" style="color:' + BRAND_INDIGO + ';text-decoration:none;">' +
+                  escapeHtml_(contactEmail) + '</a></p>'
+              : '') +
+            '<p style="margin:0 0 12px;font-size:13px;font-weight:bold;color:' + BRAND_GOLD + ';">' +
+              'Global Organization of Divinity</p>' +
+            (logoBlob
+              ? '<img src="cid:godLogo" width="130" alt="Global Organization of Divinity" style="display:inline-block;">'
+              : '') +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  const options = {
     to: email,
     subject: 'Reset your Bhagavatam Self Study password',
-    body: body
+    body: plainBody,
+    htmlBody: htmlBody
+  };
+  if (logoBlob) options.inlineImages = { godLogo: logoBlob };
+  MailApp.sendEmail(options);
+}
+
+/** Fetches the GOD logo for the email footer. Returns null (and the email
+ *  still sends, just without the image) if the fetch fails. */
+function getLogoBlob_() {
+  try {
+    const url = PropertiesService.getScriptProperties().getProperty('LOGO_URL') || DEFAULT_LOGO_URL;
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+    if (res.getResponseCode() !== 200) return null;
+    return res.getBlob().setName('godLogo');
+  } catch (err) {
+    return null;
+  }
+}
+
+function escapeHtml_(value) {
+  return String(value).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
 

@@ -77,7 +77,11 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
     return { ok: false, error: "No topics found for that week/topic combination. Try 'All topics'.", status: 400 };
   }
 
-  const sourceText = getSourceText(catalog, weekIds);
+  // Pass the resolved topic scope so a topic-filtered request is grounded in
+  // just those topics' excerpts, not the whole week's (or, across weeks, the
+  // whole course's) notes — see getSourceText. requestedTopics being empty
+  // means "all topics", which getSourceText treats as the full week.
+  const sourceText = getSourceText(catalog, weekIds, requestedTopics.length > 0 ? scopeTopics : null);
 
   // Only MULTIPLE_CHOICE/TRUE_FALSE match what the generator itself ever
   // produces (and what findDuplicate's answer/choice-overlap check expects)

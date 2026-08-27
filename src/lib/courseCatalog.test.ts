@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCourseCatalog, getSourceText, resolveGenerationScope, toPublicCourseWeeks, type CourseWeek } from "@/lib/courseCatalog";
+import courseTopicText from "@/data/courseTopicText.json";
 
 function week(overrides: Partial<CourseWeek> = {}): CourseWeek {
   return {
@@ -81,5 +82,58 @@ describe("getSourceText", () => {
     const text = getSourceText(weeks, ["week-1"]);
     expect(text).toContain("Sanatana Dharma");
     expect(text.length).toBeGreaterThan(100);
+  });
+
+  it("narrows grounding text to the selected topics' excerpts instead of the whole week", async () => {
+    const weeks = await getCourseCatalog();
+    const fullWeek = getSourceText(weeks, ["week-1"]);
+    const scoped = getSourceText(weeks, ["week-1"], [
+      "Origin of the Term Hinduism",
+      "The Two Itihasas - Ramayana and Mahabharata",
+    ]);
+
+    expect(scoped.length).toBeLessThan(fullWeek.length);
+    expect(scoped).toContain("Indus Valley Civilisation");
+    expect(scoped).toContain("Valmiki");
+    // A phrase unique to a week-1 topic that wasn't selected.
+    expect(scoped).not.toContain("Brahmavaivarta");
+  });
+
+  it("treats selecting every topic of a week the same as 'all topics' (full week text)", async () => {
+    const weeks = await getCourseCatalog();
+    const weekOne = weeks.find((w) => w.id === "week-1")!;
+    expect(getSourceText(weeks, ["week-1"], weekOne.topics)).toBe(getSourceText(weeks, ["week-1"]));
+  });
+
+  it("falls back to the full week when the selected topics resolve to too little text", async () => {
+    const weeks = await getCourseCatalog();
+    const scoped = getSourceText(weeks, ["week-1"], ["not a real topic in this week"]);
+    expect(scoped).toBe(getSourceText(weeks, ["week-1"]));
+  });
+});
+
+describe("courseTopicText.json index", () => {
+  it("has a non-empty excerpt for every topic of every week in the catalog", async () => {
+    const weeks = await getCourseCatalog();
+    const index: Record<string, Record<string, string>> = courseTopicText;
+    for (const week of weeks) {
+      const weekIndex = index[week.id];
+      expect(weekIndex, `missing topic index for ${week.id}`).toBeDefined();
+      for (const topic of week.topics) {
+        expect(weekIndex[topic]?.trim(), `missing/empty excerpt for ${week.id} → "${topic}"`).toBeTruthy();
+      }
+    }
+  });
+
+  it("has no index keys that don't correspond to a real catalog topic", async () => {
+    const weeks = await getCourseCatalog();
+    const index: Record<string, Record<string, string>> = courseTopicText;
+    for (const [weekId, topics] of Object.entries(index)) {
+      const week = weeks.find((w) => w.id === weekId);
+      expect(week, `index references unknown week ${weekId}`).toBeDefined();
+      for (const topic of Object.keys(topics)) {
+        expect(week!.topics, `index for ${weekId} has stale topic "${topic}"`).toContain(topic);
+      }
+    }
   });
 });

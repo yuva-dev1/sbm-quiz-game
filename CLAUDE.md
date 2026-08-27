@@ -92,7 +92,11 @@ import from here rather than hand-rolling event strings.
 (primary model, falling back to a second on a repair retry), grounded in course-note text
 (`src/data/courseNotes.json`, regenerated from `content/course-notes/` via
 `node scripts/build_course_notes.mjs`) and scoped by `src/data/courseCatalog.json` (regenerated via
-`python scripts/build_course_catalog.py`). Every candidate question is scored against the source
+`python scripts/build_course_catalog.py`). When a host picks specific topics rather than "all
+topics", grounding is narrowed further to just those topics' hand-authored excerpts
+(`src/data/courseTopicText.json`, see `docs/topic-scoped-grounding.md`) instead of the whole week's
+notes — the single biggest lever on generation latency, since the source text rides along in every
+draft and judge call. Every candidate question is scored against the source
 notes with autoevals' Faithfulness metric (`src/lib/faithfulness.ts`) before acceptance. The same
 generator is also exposed standalone at `POST /generate-quiz` for other services, gated by a bearer
 token (`GENERATE_QUIZ_API_KEY`), independent of this app's own DB-backed `/api/quizzes/*` flow.
@@ -127,4 +131,6 @@ CI, etc.), see the `clean-codebase` skill (`.claude/skills/clean-codebase/SKILL.
   rationale (denormalization decisions, why `sessionQuestions` isn't named `questions`, the
   doc-ID-as-natural-key pattern, incrementally-maintained counters) and real findings from building
   it.
+- `docs/topic-scoped-grounding.md` — how topic selection narrows the grounding text handed to quiz
+  generation (`src/data/courseTopicText.json`), and how to extend the index for a new week.
 - `load-test/README.md` — k6-based load testing for the 500-1000-player worst case.

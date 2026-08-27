@@ -33,12 +33,20 @@ async function callSheetsScript(body) {
   return payload;
 }
 
-export async function createAccount(regNo, passwordHash) {
-  return callSheetsScript({ action: 'register', regNo, passwordHash });
+export async function createAccount(regNo, passwordHash, email) {
+  return callSheetsScript({ action: 'register', regNo, email, passwordHash });
 }
 
 export async function findAccount(regNo) {
   return callSheetsScript({ action: 'login', regNo });
+}
+
+export async function requestPasswordReset(regNo, email) {
+  return callSheetsScript({ action: 'requestPasswordReset', regNo, email });
+}
+
+export async function resetPassword(regNo, token, passwordHash) {
+  return callSheetsScript({ action: 'resetPassword', regNo, token, passwordHash });
 }
 
 export async function saveQuizAttempt(regNo, attempt) {

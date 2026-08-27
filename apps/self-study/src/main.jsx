@@ -772,6 +772,12 @@ function SelfStudyRoot() {
   const [regNo, setRegNo] = useState('');
 
   useEffect(() => {
+    // A password-reset link (/?token=…) always lands on the auth screen, even
+    // if an old session cookie is still around — AuthGate reads the token.
+    if (new URLSearchParams(window.location.search).has('token')) {
+      setStatus('anonymous');
+      return;
+    }
     fetch('/api/auth/session')
       .then((response) => response.json())
       .then((session) => {

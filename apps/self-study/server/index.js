@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import { createSessionCookie, clearSessionCookie, readSession, requireSession } from './session.js';
-import { createAccount, findAccount, saveQuizAttempt, listQuizAttempts, saveFlashcardSet, listFlashcardSets } from './sheetsClient.js';
+import { createAccount, findAccount, requestPasswordReset, resetPassword, saveQuizAttempt, listQuizAttempts, saveFlashcardSet, listFlashcardSets } from './sheetsClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, '..', 'dist');
@@ -19,6 +19,12 @@ const GENERATE_QUIZ_API_KEY = process.env.GENERATE_QUIZ_API_KEY || '';
 const REG_NO_LENGTH = 5;
 const MIN_PASSWORD_LENGTH = 8;
 const BCRYPT_ROUNDS = 12;
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// Per-regNo cooldown on password-reset requests so a reset link can't be
+// spammed at someone (and the Apps Script mail quota can't be drained).
+// Best-effort/in-memory — one Cloud Run instance — which is plenty here.
+const FORGOT_COOLDOWN_MS = 60_000;
+const forgotLastSent = new Map();
 // Large decks (25-35 items) can take several minutes at the generator's fixed
 // concurrency of 4 (see localQuizGenerator.ts's CONCURRENCY) — this is a
 // generous outer safety net, not the expected duration. The SSE progress
@@ -39,12 +45,21 @@ function normalizeRegNo(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 app.post('/api/auth/register', async (req, res) => {
   const regNo = normalizeRegNo(req.body?.regNo);
+  const email = normalizeEmail(req.body?.email);
   const password = String(req.body?.password || '');
 
   if (regNo.length !== REG_NO_LENGTH) {
     res.status(400).json({ error: `Registration number must be exactly ${REG_NO_LENGTH} characters.` });
+    return;
+  }
+  if (!EMAIL_PATTERN.test(email) || email.length > 254) {
+    res.status(400).json({ error: 'Enter a valid email address — it is the only way to recover a lost password.' });
     return;
   }
   if (password.length < MIN_PASSWORD_LENGTH) {
@@ -54,7 +69,7 @@ app.post('/api/auth/register', async (req, res) => {
 
   try {
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const result = await createAccount(regNo, passwordHash);
+    const result = await createAccount(regNo, passwordHash, email);
     if (!result.ok) {
       res.status(409).json({ error: result.error || 'That registration number is already in use.' });
       return;
@@ -103,6 +118,64 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/auth/session', (req, res) => {
   const regNo = readSession(req, SESSION_SECRET);
   res.json(regNo ? { authenticated: true, regNo } : { authenticated: false });
+});
+
+// Always answers { ok: true } regardless of whether the regNo/email match an
+// account — never reveal account existence here. The Apps Script generates
+// the token, stores its hash, and sends the email; this route only relays.
+app.post('/api/auth/forgot', async (req, res) => {
+  const regNo = normalizeRegNo(req.body?.regNo);
+  const email = normalizeEmail(req.body?.email);
+
+  const done = () => res.status(200).json({ ok: true });
+  if (regNo.length !== REG_NO_LENGTH || !EMAIL_PATTERN.test(email)) {
+    done();
+    return;
+  }
+
+  const now = Date.now();
+  if (now - (forgotLastSent.get(regNo) || 0) < FORGOT_COOLDOWN_MS) {
+    done();
+    return;
+  }
+  forgotLastSent.set(regNo, now);
+  if (forgotLastSent.size > 5000) forgotLastSent.clear();
+
+  try {
+    await requestPasswordReset(regNo, email);
+  } catch (error) {
+    console.error('forgot-password error:', error);
+  }
+  done();
+});
+
+app.post('/api/auth/reset', async (req, res) => {
+  const regNo = normalizeRegNo(req.body?.regNo);
+  const token = String(req.body?.token || '');
+  const password = String(req.body?.password || '');
+
+  if (regNo.length !== REG_NO_LENGTH || !token) {
+    res.status(400).json({ error: 'This reset link is invalid or has expired. Request a new one.' });
+    return;
+  }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    return;
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const result = await resetPassword(regNo, token, passwordHash);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error || 'This reset link is invalid or has expired. Request a new one.' });
+      return;
+    }
+    res.setHeader('Set-Cookie', createSessionCookie(regNo, SESSION_SECRET));
+    res.status(200).json({ regNo });
+  } catch (error) {
+    console.error('reset-password error:', error);
+    res.status(502).json({ error: 'Could not reach the accounts sheet. Please try again.' });
+  }
 });
 
 app.post('/api/quiz/generate', requireSession(SESSION_SECRET), async (req, res) => {

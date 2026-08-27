@@ -1,50 +1,102 @@
-import { useState } from 'react';
-import { ArrowRight, LoaderCircle, LogIn, UserPlus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowRight, KeyRound, LoaderCircle, LogIn, MailCheck, UserPlus } from 'lucide-react';
 import { OFFICIAL_GOD_LOGO_URL } from './brandAssets.js';
 
 const REG_NO_LENGTH = 5;
 const MIN_PASSWORD_LENGTH = 8;
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+const COPY = {
+  login: { heading: 'Welcome back', subtitle: 'Log in with your registration number to continue.' },
+  register: { heading: 'Create your account', subtitle: 'Registration number, email, and a password to get started.' },
+  forgot: { heading: 'Reset your password', subtitle: 'Enter your registration number and the email on your account.' },
+  reset: { heading: 'Choose a new password', subtitle: 'Set a new password for your account.' }
+};
 
 export default function AuthGate({ onAuthenticated }) {
   const [view, setView] = useState('login');
   const [regNo, setRegNo] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
 
-  const isRegister = view === 'register';
+  // A reset email links back here as /?token=…&reg=… — pick that up, show the
+  // reset view, and strip the query so a refresh doesn't replay it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    if (!token) return;
+    setResetToken(token);
+    setRegNo((params.get('reg') || '').trim().toUpperCase());
+    setView('reset');
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
 
   const switchView = (nextView) => {
     setView(nextView);
     setError('');
+    setInfo('');
     setPassword('');
     setConfirmPassword('');
   };
 
   const submit = async (event) => {
     event.preventDefault();
+    setError('');
+    setInfo('');
+
     const normalizedRegNo = regNo.trim().toUpperCase();
-    if (normalizedRegNo.length !== REG_NO_LENGTH) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const needsRegNo = view !== 'reset';
+
+    if (needsRegNo && normalizedRegNo.length !== REG_NO_LENGTH) {
       setError(`Registration number must be exactly ${REG_NO_LENGTH} characters.`);
       return;
     }
-    if (isRegister && password.length < MIN_PASSWORD_LENGTH) {
+    if ((view === 'register' || view === 'forgot') && !EMAIL_PATTERN.test(normalizedEmail)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    if ((view === 'register' || view === 'reset') && password.length < MIN_PASSWORD_LENGTH) {
       setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
-    if (isRegister && password !== confirmPassword) {
+    if ((view === 'register' || view === 'reset') && password !== confirmPassword) {
       setError('Passwords do not match.');
       return;
     }
 
     setIsSubmitting(true);
-    setError('');
     try {
-      const response = await fetch(isRegister ? '/api/auth/register' : '/api/auth/login', {
+      if (view === 'forgot') {
+        await fetch('/api/auth/forgot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ regNo: normalizedRegNo, email: normalizedEmail })
+        });
+        setInfo('If those details match an account, a password reset link is on its way. Check your email, including spam.');
+        setRegNo('');
+        setEmail('');
+        return;
+      }
+
+      const endpoint =
+        view === 'register' ? '/api/auth/register' : view === 'reset' ? '/api/auth/reset' : '/api/auth/login';
+      const body =
+        view === 'register'
+          ? { regNo: normalizedRegNo, email: normalizedEmail, password }
+          : view === 'reset'
+            ? { regNo: normalizedRegNo, token: resetToken, password }
+            : { regNo: normalizedRegNo, password };
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ regNo: normalizedRegNo, password })
+        body: JSON.stringify(body)
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'Something went wrong. Please try again.');
@@ -56,41 +108,79 @@ export default function AuthGate({ onAuthenticated }) {
     }
   };
 
+  const showRegNo = view !== 'reset';
+  const showEmail = view === 'register' || view === 'forgot';
+  const showPassword = view === 'login' || view === 'register' || view === 'reset';
+  const showConfirm = view === 'register' || view === 'reset';
+
+  const submitLabel = {
+    login: 'Log in',
+    register: 'Create account',
+    forgot: 'Send reset link',
+    reset: 'Set new password'
+  }[view];
+  const submittingLabel = {
+    login: 'Logging in…',
+    register: 'Creating account…',
+    forgot: 'Sending…',
+    reset: 'Saving…'
+  }[view];
+  const SubmitIcon = { login: LogIn, register: UserPlus, forgot: MailCheck, reset: KeyRound }[view];
+
   return (
     <div className="auth-shell">
       <div className="auth-card">
         <span className="brand-logo-art auth-logo" aria-hidden="true"><img src={OFFICIAL_GOD_LOGO_URL} alt="" /></span>
         <p className="eyebrow gold">Bhagavatam Self Study</p>
-        <h1>{isRegister ? 'Create your account' : 'Welcome back'}</h1>
-        <p className="auth-subtitle">
-          {isRegister ? 'Use your registration number to start practicing.' : 'Log in with your registration number to continue.'}
-        </p>
+        <h1>{COPY[view].heading}</h1>
+        <p className="auth-subtitle">{COPY[view].subtitle}</p>
 
         <form onSubmit={submit}>
-          <label className="auth-field">
-            <span className="field-label">Registration number</span>
-            <input
-              value={regNo}
-              onChange={(event) => setRegNo(event.target.value)}
-              maxLength={REG_NO_LENGTH}
-              autoCapitalize="characters"
-              autoComplete="username"
-              placeholder="AB123"
-              required
-            />
-          </label>
-          <label className="auth-field">
-            <span className="field-label">Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={isRegister ? 'new-password' : 'current-password'}
-              minLength={isRegister ? MIN_PASSWORD_LENGTH : undefined}
-              required
-            />
-          </label>
-          {isRegister && (
+          {showRegNo && (
+            <label className="auth-field">
+              <span className="field-label">Registration number</span>
+              <input
+                value={regNo}
+                onChange={(event) => setRegNo(event.target.value)}
+                maxLength={REG_NO_LENGTH}
+                autoCapitalize="characters"
+                autoComplete="username"
+                placeholder="AB123"
+                required
+              />
+            </label>
+          )}
+
+          {showEmail && (
+            <label className="auth-field">
+              <span className="field-label">Email</span>
+              <input
+                type="email"
+                inputMode="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+          )}
+
+          {showPassword && (
+            <label className="auth-field">
+              <span className="field-label">{view === 'reset' ? 'New password' : 'Password'}</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={view === 'login' ? 'current-password' : 'new-password'}
+                minLength={view === 'login' ? undefined : MIN_PASSWORD_LENGTH}
+                required
+              />
+            </label>
+          )}
+
+          {showConfirm && (
             <label className="auth-field">
               <span className="field-label">Confirm password</span>
               <input
@@ -103,20 +193,34 @@ export default function AuthGate({ onAuthenticated }) {
             </label>
           )}
 
+          {view === 'login' && (
+            <button className="auth-forgot" type="button" onClick={() => switchView('forgot')}>
+              Forgot your password?
+            </button>
+          )}
+
           {error && <p className="auth-error" role="alert">{error}</p>}
+          {info && <p className="auth-info" role="status">{info}</p>}
 
           <button className="primary-button auth-submit" type="submit" disabled={isSubmitting}>
             {isSubmitting ? (
-              <><LoaderCircle className="spin" size={17} /> {isRegister ? 'Creating account...' : 'Logging in...'}</>
+              <><LoaderCircle className="spin" size={17} /> {submittingLabel}</>
             ) : (
-              <>{isRegister ? <UserPlus size={17} /> : <LogIn size={17} />} {isRegister ? 'Create account' : 'Log in'} <ArrowRight size={16} /></>
+              <><SubmitIcon size={17} /> {submitLabel} <ArrowRight size={16} /></>
             )}
           </button>
         </form>
 
-        <button className="auth-switch" type="button" onClick={() => switchView(isRegister ? 'login' : 'register')}>
-          {isRegister ? 'Already have an account? Log in' : "Don't have an account? Create one"}
-        </button>
+        {(view === 'login' || view === 'register') && (
+          <button className="auth-switch" type="button" onClick={() => switchView(view === 'register' ? 'login' : 'register')}>
+            {view === 'register' ? 'Already have an account? Log in' : "Don't have an account? Create one"}
+          </button>
+        )}
+        {(view === 'forgot' || view === 'reset') && (
+          <button className="auth-switch" type="button" onClick={() => switchView('login')}>
+            Back to log in
+          </button>
+        )}
       </div>
     </div>
   );

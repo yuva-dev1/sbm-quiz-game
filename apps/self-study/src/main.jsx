@@ -767,17 +767,18 @@ function SelfStudyApp({ regNo, onLogout }) {
   );
 }
 
+function hasResetToken() {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('token');
+}
+
 function SelfStudyRoot() {
-  const [status, setStatus] = useState('loading'); // loading | anonymous | authenticated
+  // A password-reset link (/?token=…) always lands on the auth screen, even if
+  // an old session cookie is still around — AuthGate reads the token.
+  const [status, setStatus] = useState(() => (hasResetToken() ? 'anonymous' : 'loading')); // loading | anonymous | authenticated
   const [regNo, setRegNo] = useState('');
 
   useEffect(() => {
-    // A password-reset link (/?token=…) always lands on the auth screen, even
-    // if an old session cookie is still around — AuthGate reads the token.
-    if (new URLSearchParams(window.location.search).has('token')) {
-      setStatus('anonymous');
-      return;
-    }
+    if (hasResetToken()) return;
     fetch('/api/auth/session')
       .then((response) => response.json())
       .then((session) => {

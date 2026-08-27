@@ -1,10 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, KeyRound, LoaderCircle, LogIn, MailCheck, UserPlus } from 'lucide-react';
 import { OFFICIAL_GOD_LOGO_URL } from './brandAssets.js';
 
 const REG_NO_LENGTH = 5;
 const MIN_PASSWORD_LENGTH = 8;
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+// A reset email links back as /?token=…&reg=… — read it once on mount.
+function readResetParams() {
+  if (typeof window === 'undefined') return { token: '', reg: '' };
+  const params = new URLSearchParams(window.location.search);
+  return { token: params.get('token') || '', reg: (params.get('reg') || '').trim().toUpperCase() };
+}
 
 const COPY = {
   login: { heading: 'Welcome back', subtitle: 'Log in with your registration number to continue.' },
@@ -14,27 +21,21 @@ const COPY = {
 };
 
 export default function AuthGate({ onAuthenticated }) {
-  const [view, setView] = useState('login');
-  const [regNo, setRegNo] = useState('');
+  const resetParams = useMemo(() => readResetParams(), []);
+  const [resetToken] = useState(resetParams.token);
+  const [view, setView] = useState(resetParams.token ? 'reset' : 'login');
+  const [regNo, setRegNo] = useState(resetParams.token ? resetParams.reg : '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [resetToken, setResetToken] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
-  // A reset email links back here as /?token=…&reg=… — pick that up, show the
-  // reset view, and strip the query so a refresh doesn't replay it.
+  // Strip the token from the URL so a refresh doesn't replay it.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-    if (!token) return;
-    setResetToken(token);
-    setRegNo((params.get('reg') || '').trim().toUpperCase());
-    setView('reset');
-    window.history.replaceState({}, '', window.location.pathname);
-  }, []);
+    if (resetParams.token) window.history.replaceState({}, '', window.location.pathname);
+  }, [resetParams.token]);
 
   const switchView = (nextView) => {
     setView(nextView);

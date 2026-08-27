@@ -74,7 +74,14 @@ const DEFAULT_FALLBACK_MODEL = "google/gemini-2.5-flash";
 // documented OpenRouter rate-limit tier for this key and no retry/backoff
 // on a 429 (see openrouter.ts's completeChat), so this is empirical, not a
 // guess, and still being pushed incrementally rather than jumping blind.
-const CONCURRENCY = 16;
+//
+// fillRound's workerCount is `Math.min(CONCURRENCY, indices.length)` (see
+// generateQuiz below), so this never spawns more workers than there are
+// slots to fill in a round — raising it past the largest allowed
+// questionCount (35, see ALLOWED_QUESTION_COUNTS) buys nothing further.
+// 32 specifically lets a 25-30 card draft round run as a single wave
+// instead of two (16 was already splitting a 25-slot draft into 16 + 9).
+const CONCURRENCY = 32;
 // Target share of a quiz that's true/false, the rest multiple_choice. Held
 // to an exact per-quiz quota (see assignQuestionTypes) rather than a
 // per-question coin flip — QA feedback was that quizzes were landing with

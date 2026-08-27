@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -245,19 +245,58 @@ function EmptyDeck() {
   );
 }
 
+// Shrinks a card's text until it fits its box, so a long question/answer
+// never scrolls or clips — short ones still render big. Re-runs on text
+// change, on card resize, and once the display font has loaded.
+const FIT_MIN_PX = 16;
+const FIT_MAX_PX = 54;
+function useFitText(text) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+
+    const fits = () => el.scrollHeight <= el.clientHeight && el.scrollWidth <= el.clientWidth + 0.5;
+    const fit = () => {
+      el.style.fontSize = `${FIT_MAX_PX}px`;
+      if (fits()) return;
+      let lo = FIT_MIN_PX;
+      let hi = FIT_MAX_PX;
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        el.style.fontSize = `${mid}px`;
+        if (fits()) lo = mid;
+        else hi = mid - 1;
+      }
+      el.style.fontSize = `${lo}px`;
+    };
+
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    if (typeof document !== 'undefined' && document.fonts?.ready) {
+      document.fonts.ready.then(fit).catch(() => {});
+    }
+    return () => observer.disconnect();
+  }, [text]);
+  return ref;
+}
+
 function Flashcard({ card, flipped, onFlip }) {
   const CategoryIcon = CATEGORY_ICONS[card.category] || CircleHelp;
+  const promptRef = useFitText(card.front);
+  const answerRef = useFitText(card.answer);
   return (
     <button className={`study-card ${flipped ? 'is-flipped' : ''}`} type="button" onClick={onFlip} aria-label={`${flipped ? 'Answer' : 'Front'} of flashcard ${card.number}. Click to show ${flipped ? 'the front' : 'the answer'}.`}>
       <span className="study-card-inner">
         <span className="study-card-face study-card-front">
           <span className="card-face-top"><span className="card-category"><CategoryIcon size={15} /> {card.category}</span><span>{String(card.number).padStart(2, '0')}</span></span>
-          <span className="card-prompt">{card.front}</span>
+          <span className="card-prompt" ref={promptRef}>{card.front}</span>
           <span className="flip-hint"><RefreshCw size={14} /> Tap to reveal the answer</span>
         </span>
         <span className="study-card-face study-card-back">
           <span className="card-face-top"><span className="card-category answer"><Sparkles size={15} /> Answer</span><span>{String(card.number).padStart(2, '0')}</span></span>
-          <span className="card-answer">{card.answer}</span>
+          <span className="card-answer" ref={answerRef}>{card.answer}</span>
           {card.detail && <span className="card-detail">{card.detail}</span>}
           <span className="flip-hint"><RefreshCw size={14} /> Tap to see the front</span>
         </span>

@@ -199,7 +199,6 @@ type FailureReason =
   | "low_faithfulness"
   | "duplicate"
   | "ambiguous"
-  | "not_verbatim"
   | "choice_too_long"
   | "excerpt_not_verbatim"
   | "difficulty_mismatch";
@@ -219,14 +218,20 @@ const DIFFICULTY_SPEC: Record<EffectiveDifficulty, { writingInstruction: string;
   beginner: {
     writingInstruction:
       "a straightforward recall question answerable directly from ONE explicit clause or sentence in the " +
-      'source — e.g. "What was Kunti Devi\'s prayer regarding calamities?" Do not phrase it as "why", "how ' +
-      'does this relate to", or "what does this signify", and do not require connecting two separate facts — ' +
-      "a student should be able to point to a single sentence in the source and be done.",
+      'source — e.g. "What was Kunti Devi\'s prayer regarding calamities?" or "What did Arjuna do to ' +
+      'Ashwatthama before letting him go?" The fact it tests must be substantive — an action someone takes, ' +
+      "the outcome of an event, or a specific relationship between named figures. It must NOT be a bare number " +
+      "or count, the expansion of a numbering code or abbreviation, the definition of a single term, or merely " +
+      'which name belongs to a list. Do not phrase it as "why", "how does this relate to", or "what does this ' +
+      'signify", and do not require connecting two separate facts — a student should be able to point to a ' +
+      "single sentence in the source and be done.",
     judgeCriteria:
       "PASSES only if the question is answerable by locating a single explicit statement in the source, with " +
       'no need to connect it to any other fact or interpret its significance. FAILS if it uses "why" / "how ' +
       'does X relate to Y" / "what does this signify" phrasing, or if answering it requires combining two ' +
-      "separate facts from the source.",
+      "separate facts from the source. ALSO FAILS if the answer is a bare number or count, the expansion of a " +
+      "numbering code or abbreviation, the definition of a single term, or simply an item from a list the " +
+      "source enumerates — those are too trivial to ask even at this tier.",
   },
   intermediate: {
     writingInstruction:
@@ -524,11 +529,19 @@ function buildUserPrompt(params: {
   lines.push(
     `Course coverage: ${params.coverageLabel || topicList}.`,
     params.focusTopic
-      ? `Focus this question specifically on: ${params.focusTopic}. (Full topic list for context: ${topicList}.)`
+      ? `This question MUST test a specific fact from this topic: ${params.focusTopic}. Do not switch to a ` +
+          `different topic because the excerpt happens to say more about another one — write the best question ` +
+          `you can about this topic. (Full topic list for context: ${topicList}.)`
       : `Topics to draw from: ${topicList}.`,
     params.type === "multiple_choice"
       ? `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}`
-      : `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}, phrased as a true/false statement.`
+      : `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}, phrased as a true/false statement.`,
+    "Whatever the difficulty, the question must test something a student would have needed to actually " +
+      "understand from the material — what someone did and the stated reason, the cause or outcome of an " +
+      "event, the relationship between two named figures, or the point a passage is making. Do NOT write a " +
+      'question whose answer is a bare number or count, the expansion of a numbering code or abbreviation (e.g. ' +
+      'what "1.2.23" stands for), the definition of a single term, or simply which name appears in a list the ' +
+      "source enumerates — those are not worth asking at any level."
   );
 
   if (params.avoidEntries.length > 0) {
@@ -586,9 +599,9 @@ function buildUserPrompt(params: {
     );
     if (params.sourceText.trim()) {
       lines.push(
-        "The correct answer must be copied verbatim, word-for-word, from the course-note excerpt above — do " +
-          "not paraphrase, reword, or shorten it. The three wrong choices should NOT be lifted from the " +
-          "excerpt; write those freely so they're clearly wrong but plausible."
+        "The correct answer must be a fact the excerpt clearly states or directly implies, worded closely to " +
+          "the source. The three wrong choices should NOT be lifted from the excerpt; write those freely so " +
+          "they're clearly wrong but plausible."
       );
     }
   }
@@ -731,10 +744,11 @@ async function attemptDraft(params: {
   const parsed = parseDraft(raw, params.type);
   if (!parsed) return { ok: false, reason: "invalid_json", raw };
 
-  // Applies to both question types (unlike the answer-verbatim check below,
-  // which is multiple_choice-only) — a true_false statement is often
-  // paraphrased or a deliberately altered fact, so it can't be required to
-  // be verbatim itself, but the excerpt backing it can.
+  // The question/answer text itself is never required to be verbatim — a
+  // true_false statement is often a paraphrase or a deliberately altered
+  // fact, and a good multiple_choice answer about what someone did rarely
+  // appears as a contiguous quote — but the `source_excerpt` the model cites
+  // as backing it must be real, checkable text a host can find in the notes.
   if (params.sourceText.trim() && (!parsed.sourceExcerpt || !isVerbatimInSource(parsed.sourceExcerpt, params.sourceText))) {
     return { ok: false, reason: "excerpt_not_verbatim", raw };
   }
@@ -742,11 +756,16 @@ async function attemptDraft(params: {
   if (parsed.type === "multiple_choice") {
     const overLong = findOverLongChoice(parsed.choices);
     if (overLong) return { ok: false, reason: "choice_too_long", raw };
-
-    if (params.sourceText.trim() && !isVerbatimInSource(parsed.answer, params.sourceText)) {
-      return { ok: false, reason: "not_verbatim", raw };
-    }
   }
+
+  // The correct answer no longer has to be a verbatim substring of the
+  // source. That check was cheap but it quietly biased the whole generator
+  // toward list/number/label facts (whose answers — "12", "1st Canto, 2nd
+  // Chapter, 23rd Verse" — are trivially verbatim) and starved narrative
+  // topics (a good answer about what someone *did* is rarely a contiguous
+  // quote), which showed up as shallow quizzes that also under-filled the
+  // requested count. Grounding is still enforced, by the faithfulness judge
+  // below and by the verbatim `source_excerpt` citation checked above.
 
   const duplicate = findDuplicate(parsed, params.avoidEntries);
   if (duplicate) {
@@ -814,14 +833,6 @@ function repairPrompt(reason: FailureReason, raw: string, effectiveDifficulty: E
       "One or more of the choices is too long — every choice must be 1 to 5 words, not a full sentence. " +
       "Shorten each choice to a short phrase or name while keeping the same meaning. Respond again with ONLY " +
       "the corrected JSON object."
-    );
-  }
-  if (reason === "not_verbatim") {
-    return (
-      `Here is what you sent:\n${raw}\n\n` +
-      "The correct answer's wording doesn't appear verbatim in the course-note excerpt — it looks paraphrased " +
-      "or reworded. Copy the correct answer's exact wording straight from the excerpt instead (the three wrong " +
-      "choices don't need to be verbatim). Respond again with ONLY the corrected JSON object."
     );
   }
   if (reason === "excerpt_not_verbatim") {

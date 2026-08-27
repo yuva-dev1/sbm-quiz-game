@@ -87,8 +87,17 @@ describe("getSourceText", () => {
   it("narrows grounding text to the selected topics' excerpts instead of the whole week", async () => {
     const weeks = await getCourseCatalog();
     const fullWeek = getSourceText(weeks, ["week-1"]);
+    // Enough topics to clear MIN_TOPIC_SCOPE_CHARS (so it doesn't fall back to
+    // the full week) but not all of them (so the "every topic selected"
+    // shortcut doesn't fire) — and deliberately omitting "The 18 Puranas and
+    // Their Three Gunas" and "The Pramana Hierarchy".
     const scoped = getSourceText(weeks, ["week-1"], [
+      "Meaning and Etymology of Sanatana Dharma",
       "Origin of the Term Hinduism",
+      "How Sanatana Dharma Differs from Other Religions",
+      "The Vedas as the Supreme Pramana",
+      "The Four Vedas - Rig, Yajur, Sama, Atharva",
+      "The Four Portions of the Vedas",
       "The Two Itihasas - Ramayana and Mahabharata",
     ]);
 

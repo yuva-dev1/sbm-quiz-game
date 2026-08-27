@@ -77,11 +77,13 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
     return { ok: false, error: "No topics found for that week/topic combination. Try 'All topics'.", status: 400 };
   }
 
-  // Pass the resolved topic scope so a topic-filtered request is grounded in
-  // just those topics' excerpts, not the whole week's (or, across weeks, the
-  // whole course's) notes — see getSourceText. requestedTopics being empty
-  // means "all topics", which getSourceText treats as the full week.
-  const sourceText = getSourceText(catalog, weekIds, requestedTopics.length > 0 ? scopeTopics : null);
+  // Topic-scoped grounding (just the selected topics' excerpts instead of the
+  // whole week's notes — see getSourceText) is limited to SELF_PACED quizzes.
+  // A LIVE (Kahoot) quiz always gets the full week's notes, so this
+  // optimisation can never change what a live session serves. Empty
+  // requestedTopics means "all topics", which is the full week either way.
+  const useTopicScope = mode === "SELF_PACED" && requestedTopics.length > 0;
+  const sourceText = getSourceText(catalog, weekIds, useTopicScope ? scopeTopics : null);
 
   // Only MULTIPLE_CHOICE/TRUE_FALSE match what the generator itself ever
   // produces (and what findDuplicate's answer/choice-overlap check expects)

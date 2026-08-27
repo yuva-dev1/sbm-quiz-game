@@ -148,6 +148,18 @@ const MAX_ROUNDS_CEILING = 3;
 // guaranteed to land on its exact difficulty tier. This is what makes
 // "8 means 8" hold without raising the wall-clock ceiling above.
 const MAX_TOPUP_ROUNDS_PER_LEVEL = 3;
+// The top-up runs on a much smaller worker pool than the main fill
+// (CONCURRENCY) and each relaxed slot is a single draft attempt rather than
+// the primary→repair→fallback ladder. Both keep a large-count top-up from
+// holding hundreds of in-flight OpenRouter responses at once — that memory
+// spike (plus the extra wall-clock) is what tipped a 25-card request over
+// the quiz service's limits and surfaced as an outright generation failure.
+const TOPUP_CONCURRENCY = 16;
+// Hard wall-clock budget for the whole relaxed top-up across all three
+// levels — a genuinely thin scope (a single light week asked for 25+ cards)
+// returns a little short rather than grinding until the request is killed
+// upstream.
+const TOPUP_DEADLINE_MS = 180_000;
 
 export type GeneratedQuestion = {
   id: string;
@@ -958,6 +970,12 @@ async function generateSlot(params: {
     if (second.ok) return withTimeLimit(second.question, effectiveDifficulty);
   }
 
+  // Relaxed slots (the end-of-run top-up) stop after the repair retry — no
+  // fallback-model third attempt. The repair pass is worth keeping (it's
+  // what nudges a slot off a duplicate fact), but a whole extra model round
+  // trip per still-failing slot is what makes a large top-up drag.
+  if (params.relax !== "none") return null;
+
   const third = await attemptDraft({
     model: params.fallbackModel,
     judgeModel: params.primaryModel,
@@ -1106,25 +1124,40 @@ export async function generateQuiz(params: {
   // instead of retrying the thin topic that stalled, and the generation
   // prompt is unchanged, so a topped-up question is still real and on-topic.
   // Duplicates are rejected at every level.
+  const topUpDeadline = Date.now() + TOPUP_DEADLINE_MS;
   async function topUp(relax: RelaxLevel): Promise<void> {
-    for (let round = 0; round < MAX_TOPUP_ROUNDS_PER_LEVEL && questions.length < params.questionCount; round++) {
+    for (
+      let round = 0;
+      round < MAX_TOPUP_ROUNDS_PER_LEVEL && questions.length < params.questionCount && Date.now() < topUpDeadline;
+      round++
+    ) {
       const need = params.questionCount - questions.length;
-      const drafted = await Promise.all(
-        Array.from({ length: need }, (_, i) =>
-          generateSlot({
-            type: (questions.length + i) % 5 === 4 ? "true_false" : "multiple_choice",
-            topics: params.topics,
-            focusTopic: null,
-            coverageLabel: params.coverageLabel,
-            difficulty: params.difficulty,
-            avoidEntries: [...existingQuestions, ...questions],
-            sourceText,
-            primaryModel,
-            fallbackModel,
-            relax,
-          })
-        )
-      );
+      // Bounded worker pool (TOPUP_CONCURRENCY), not one promise per missing
+      // slot — a 15-short round otherwise fans out to dozens of concurrent
+      // generateSlot calls on top of the main fill's own load.
+      const drafted: (GeneratedQuestion | null)[] = [];
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < need && Date.now() < topUpDeadline) {
+          const i = cursor++;
+          drafted.push(
+            await generateSlot({
+              type: (questions.length + i) % 5 === 4 ? "true_false" : "multiple_choice",
+              topics: params.topics,
+              focusTopic: null,
+              coverageLabel: params.coverageLabel,
+              difficulty: params.difficulty,
+              avoidEntries: [...existingQuestions, ...questions],
+              sourceText,
+              primaryModel,
+              fallbackModel,
+              relax,
+            })
+          );
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(TOPUP_CONCURRENCY, need) }, worker));
+
       for (const q of drafted) {
         if (questions.length >= params.questionCount) break;
         if (q && !findDuplicate(q, [...existingQuestions, ...questions])) {

@@ -40,9 +40,17 @@ that week's notes. An excerpt can be reused across two closely-related topics;
 - `topics` given → for each week, concatenate just the excerpts for that week's
   selected topics. A week falls back to its full notes when **every** one of its
   topics was selected anyway, when it has no index block, or when the selected
-  topics resolve to less than `MIN_TOPIC_SCOPE_CHARS` (600) of text — a thin
-  topic on its own shouldn't starve the generator.
+  topics resolve to less than `MIN_TOPIC_SCOPE_CHARS` (4000) of text.
 
-`generateQuizRequest.ts` passes the resolved `scopeTopics` only when the request
-actually named topics (`requestedTopics.length > 0`); an empty list means "all
-topics" and stays on the full-week path.
+`MIN_TOPIC_SCOPE_CHARS` is deliberately high. A handful of topics from a single
+week still clears the week's own full-notes size, so scoping only actually
+narrows anything for large selections (many topics, or several weeks at once) —
+which is the only case where the un-scoped text was ever a real latency problem.
+An earlier value of 600 let a two-topic pick hand the model a few hundred
+characters and still ask for 8 questions; it came back with 5 shallow ones.
+
+`generateQuizRequest.ts` only passes the resolved `scopeTopics` when
+**`mode === "SELF_PACED"`** and the request actually named topics. A `LIVE`
+(Kahoot) quiz always gets the full week's notes — topic-scoping can never change
+what a live session serves. An empty topic list ("all topics") stays on the
+full-week path in both modes.

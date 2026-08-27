@@ -124,10 +124,15 @@ const notesById: Record<string, string> = courseNotes;
 // week's notes — see docs/topic-scoped-grounding.md.
 const topicTextByWeek: Record<string, Record<string, string>> = courseTopicText;
 // Below this many characters, the resolved per-topic excerpts aren't enough
-// material for a quiz on their own (a thin topic, e.g. one only mentioned in
-// passing in an infographic) — fall back to the whole week's notes for that
-// week rather than starving the generator.
-const MIN_TOPIC_SCOPE_CHARS = 600;
+// material for the generator to draw a full quiz from without repeating
+// itself into a short, shallow result — fall back to the whole week's notes
+// for that week. Deliberately high: a handful of topics picked from one week
+// still comfortably clears the week's own full-notes size, so scoping only
+// actually kicks in for large selections (many topics, or several weeks),
+// which is the only case where the un-scoped text was a real problem. An
+// earlier value of 600 let a two-topic pick hand the model a few hundred
+// characters and ask for 8 questions — it came back with 5 trivial ones.
+const MIN_TOPIC_SCOPE_CHARS = 4000;
 
 function fullWeekText(week: CourseWeek): string {
   return week.sourceDocuments

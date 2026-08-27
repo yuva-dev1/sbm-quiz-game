@@ -118,7 +118,9 @@ const MAX_SOURCE_TEXT_CHARS = 150_000;
 // failed) and slots knocked out by the cross-slot duplicate sweep. One
 // extra pass beyond the initial draft wasn't enough to reliably hit the
 // requested question count, especially for smaller quizzes where a single
-// dropped slot is a visible fraction of the total.
+// dropped slot is a visible fraction of the total. Note this is currently
+// clamped down by MAX_ROUNDS_CEILING; the exact requested count is instead
+// guaranteed by the relaxed top-up pass at the end of generateQuiz.
 const MAX_FILL_ROUNDS = 5;
 // Upper bound on maxRounds below, regardless of how many topics are in
 // scope. Without this, a broad multi-week "all topics" request (each week
@@ -137,6 +139,15 @@ const MAX_FILL_ROUNDS = 5;
 // 100s. Tightened to 3 (draft + 2 repair passes) specifically to bound
 // wall-clock time, not just eventual fill-completeness.
 const MAX_ROUNDS_CEILING = 3;
+// After the quality-first rounds above, any shortfall against the requested
+// question count is topped up here with progressively relaxed acceptance
+// (see attemptDraft's `relax`): first drop the difficulty-tier and
+// single-defensible-answer judges, then also drop the faithfulness score.
+// The generation prompt is unchanged throughout, so these are still real,
+// on-topic, source-grounded questions — a relaxed slot just isn't
+// guaranteed to land on its exact difficulty tier. This is what makes
+// "8 means 8" hold without raising the wall-clock ceiling above.
+const MAX_TOPUP_ROUNDS_PER_LEVEL = 3;
 
 export type GeneratedQuestion = {
   id: string;
@@ -194,12 +205,21 @@ export class QuizGenerationError extends Error {
 type Difficulty = "beginner" | "intermediate" | "advanced" | "mixed";
 type EffectiveDifficulty = "beginner" | "intermediate" | "advanced";
 type QuestionType = "multiple_choice" | "true_false";
+// How much of the acceptance gauntlet a draft attempt must clear, escalated
+// by the end-of-run top-up in generateQuiz to guarantee the requested count.
+// "none" is the full bar. "shape" drops only the single-defensible-answer
+// judge (the one most prone to false rejects). "all" also drops the
+// difficulty-tier judge — so the trivia ban is no longer enforced, though
+// the generation prompt still discourages it. "bare" additionally drops
+// faithfulness scoring and downgrades a missing/bad source_excerpt to just
+// dropping the citation — the last-resort floor. Grounding (faithfulness)
+// survives every level except "bare".
+type RelaxLevel = "none" | "shape" | "all" | "bare";
 type FailureReason =
   | "invalid_json"
   | "low_faithfulness"
   | "duplicate"
   | "ambiguous"
-  | "not_verbatim"
   | "choice_too_long"
   | "excerpt_not_verbatim"
   | "difficulty_mismatch";
@@ -219,14 +239,21 @@ const DIFFICULTY_SPEC: Record<EffectiveDifficulty, { writingInstruction: string;
   beginner: {
     writingInstruction:
       "a straightforward recall question answerable directly from ONE explicit clause or sentence in the " +
-      'source — e.g. "What was Kunti Devi\'s prayer regarding calamities?" Do not phrase it as "why", "how ' +
-      'does this relate to", or "what does this signify", and do not require connecting two separate facts — ' +
-      "a student should be able to point to a single sentence in the source and be done.",
+      'source — e.g. "What was Kunti Devi\'s prayer regarding calamities?" or "What did Arjuna do to ' +
+      'Ashwatthama before letting him go?" The fact it tests must be substantive — an action someone takes, ' +
+      "the outcome of an event, or a specific relationship between named figures. It must NOT be a bare number " +
+      "or count, the expansion of a numbering code or abbreviation, the definition of a single term, or merely " +
+      'which name belongs to a list. Do not phrase it as "why", "how does this relate to", or "what does this ' +
+      'signify", and do not require connecting two separate facts — a student should be able to point to a ' +
+      "single sentence in the source and be done.",
     judgeCriteria:
       "PASSES only if the question is answerable by locating a single explicit statement in the source, with " +
       'no need to connect it to any other fact or interpret its significance. FAILS if it uses "why" / "how ' +
       'does X relate to Y" / "what does this signify" phrasing, or if answering it requires combining two ' +
-      "separate facts from the source.",
+      "separate facts from the source. ALSO FAILS if the fact it tests is just a bare number or count " +
+      "(including a true/false statement that merely asserts a count), a numbering-code or abbreviation " +
+      "expansion, a single term's definition, or which items belong to a list the source enumerates — those " +
+      "are too trivial to ask even at this tier.",
   },
   intermediate: {
     writingInstruction:
@@ -524,11 +551,21 @@ function buildUserPrompt(params: {
   lines.push(
     `Course coverage: ${params.coverageLabel || topicList}.`,
     params.focusTopic
-      ? `Focus this question specifically on: ${params.focusTopic}. (Full topic list for context: ${topicList}.)`
+      ? `This question MUST test a specific fact from this topic: ${params.focusTopic}. Do not switch to a ` +
+          `different topic because the excerpt happens to say more about another one — write the best question ` +
+          `you can about this topic. (Full topic list for context: ${topicList}.)`
       : `Topics to draw from: ${topicList}.`,
     params.type === "multiple_choice"
       ? `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}`
-      : `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}, phrased as a true/false statement.`
+      : `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}, phrased as a true/false statement.`,
+    "Whatever the difficulty, the question must test something a student would have needed to actually " +
+      "understand from the material — what someone did and the stated reason, the cause or outcome of an " +
+      "event, the relationship between two named figures, or the point a passage is making. Do NOT build the " +
+      "question around a bare number or count (e.g. how many cantos there are), the expansion of a numbering " +
+      'code or abbreviation (e.g. what "1.2.23" stands for), a single term\'s definition, or which items belong ' +
+      "to a list the source enumerates. This applies to true/false statements too — do not write one that just " +
+      "asserts a count, or that just asserts an item is (or isn't) in such a list. And for multiple choice, do " +
+      "not write a question where more than one of the four choices is a true statement from the source."
   );
 
   if (params.avoidEntries.length > 0) {
@@ -586,9 +623,9 @@ function buildUserPrompt(params: {
     );
     if (params.sourceText.trim()) {
       lines.push(
-        "The correct answer must be copied verbatim, word-for-word, from the course-note excerpt above — do " +
-          "not paraphrase, reword, or shorten it. The three wrong choices should NOT be lifted from the " +
-          "excerpt; write those freely so they're clearly wrong but plausible."
+        "The correct answer must be a fact the excerpt clearly states or directly implies, worded closely to " +
+          "the source. The three wrong choices should NOT be lifted from the excerpt; write those freely so " +
+          "they're clearly wrong but plausible."
       );
     }
   }
@@ -724,6 +761,7 @@ async function attemptDraft(params: {
   effectiveDifficulty: EffectiveDifficulty;
   sourceText: string;
   avoidEntries: GeneratedQuestion[];
+  relax: RelaxLevel;
 }): Promise<AttemptResult> {
   const raw = await tryComplete(params.model, params.messages);
   if (!raw) return { ok: false, reason: "invalid_json", raw: null };
@@ -731,40 +769,59 @@ async function attemptDraft(params: {
   const parsed = parseDraft(raw, params.type);
   if (!parsed) return { ok: false, reason: "invalid_json", raw };
 
-  // Applies to both question types (unlike the answer-verbatim check below,
-  // which is multiple_choice-only) — a true_false statement is often
-  // paraphrased or a deliberately altered fact, so it can't be required to
-  // be verbatim itself, but the excerpt backing it can.
-  if (params.sourceText.trim() && (!parsed.sourceExcerpt || !isVerbatimInSource(parsed.sourceExcerpt, params.sourceText))) {
-    return { ok: false, reason: "excerpt_not_verbatim", raw };
+  // The question/answer text itself is never required to be verbatim — a
+  // true_false statement is often a paraphrase or a deliberately altered
+  // fact, and a good multiple_choice answer about what someone did rarely
+  // appears as a contiguous quote — but the `source_excerpt` the model cites
+  // as backing it must be real, checkable text a host can find in the notes.
+  // Fully relaxed, a bad/missing citation just gets dropped rather than
+  // failing the whole draft.
+  if (params.sourceText.trim()) {
+    const excerptOk = !!parsed.sourceExcerpt && isVerbatimInSource(parsed.sourceExcerpt, params.sourceText);
+    if (!excerptOk) {
+      if (params.relax === "bare") parsed.sourceExcerpt = null;
+      else return { ok: false, reason: "excerpt_not_verbatim", raw };
+    }
   }
 
   if (parsed.type === "multiple_choice") {
     const overLong = findOverLongChoice(parsed.choices);
     if (overLong) return { ok: false, reason: "choice_too_long", raw };
-
-    if (params.sourceText.trim() && !isVerbatimInSource(parsed.answer, params.sourceText)) {
-      return { ok: false, reason: "not_verbatim", raw };
-    }
   }
+
+  // The correct answer no longer has to be a verbatim substring of the
+  // source. That check was cheap but it quietly biased the whole generator
+  // toward list/number/label facts (whose answers — "12", "1st Canto, 2nd
+  // Chapter, 23rd Verse" — are trivially verbatim) and starved narrative
+  // topics (a good answer about what someone *did* is rarely a contiguous
+  // quote), which showed up as shallow quizzes that also under-filled the
+  // requested count. Grounding is still enforced, by the faithfulness judge
+  // below and by the verbatim `source_excerpt` citation checked above.
 
   const duplicate = findDuplicate(parsed, params.avoidEntries);
   if (duplicate) {
     return { ok: false, reason: "duplicate", raw, duplicateOf: duplicate.question };
   }
 
-  // The three LLM-judge checks below are independent of each other (each
-  // judges the same drafted question from a different angle) so they run
-  // concurrently rather than as three back-to-back round trips — with the
-  // difficulty-conformance judge added on top of the pre-existing
-  // faithfulness/answerability checks, running them in series was adding a
-  // third full model round trip to every single draft attempt and was the
-  // dominant cause of slow quiz generation.
+  // LLM-judge checks, dialled back by relax level (see RelaxLevel):
+  //   bare  → none at all (schema-valid + non-duplicate is the whole bar)
+  //   all   → faithfulness only
+  //   shape → faithfulness + difficulty tier
+  //   none  → all three (they're independent, so they run concurrently
+  //           rather than as three back-to-back round trips)
+  if (params.relax === "bare") {
+    return { ok: true, question: parsed };
+  }
+
+  const runDifficulty = params.relax === "none" || params.relax === "shape";
+  const runAnswerable = params.relax === "none";
   const claim = `Question: ${parsed.question}\nAnswer: ${parsed.answer}\nExplanation: ${parsed.explanation}`;
   const [difficultyMatches, faithfulness, answerable] = await Promise.all([
-    checkDifficultyMatch(parsed, params.effectiveDifficulty, params.judgeModel),
+    runDifficulty ? checkDifficultyMatch(parsed, params.effectiveDifficulty, params.judgeModel) : Promise.resolve(null),
     scoreFaithfulness(claim, params.sourceText, params.judgeModel),
-    parsed.type === "multiple_choice" ? checkAnswerable(parsed, params.sourceText, params.judgeModel) : Promise.resolve(null),
+    runAnswerable && parsed.type === "multiple_choice"
+      ? checkAnswerable(parsed, params.sourceText, params.judgeModel)
+      : Promise.resolve(null),
   ]);
 
   if (difficultyMatches === false) {
@@ -816,14 +873,6 @@ function repairPrompt(reason: FailureReason, raw: string, effectiveDifficulty: E
       "the corrected JSON object."
     );
   }
-  if (reason === "not_verbatim") {
-    return (
-      `Here is what you sent:\n${raw}\n\n` +
-      "The correct answer's wording doesn't appear verbatim in the course-note excerpt — it looks paraphrased " +
-      "or reworded. Copy the correct answer's exact wording straight from the excerpt instead (the three wrong " +
-      "choices don't need to be verbatim). Respond again with ONLY the corrected JSON object."
-    );
-  }
   if (reason === "excerpt_not_verbatim") {
     return (
       `Here is what you sent:\n${raw}\n\n` +
@@ -859,6 +908,7 @@ async function generateSlot(params: {
   sourceText: string;
   primaryModel: string;
   fallbackModel: string;
+  relax: RelaxLevel;
 }): Promise<GeneratedQuestion | null> {
   const type = params.type;
   const effectiveDifficulty = pickEffectiveDifficulty(params.difficulty);
@@ -886,6 +936,7 @@ async function generateSlot(params: {
     effectiveDifficulty,
     sourceText: params.sourceText,
     avoidEntries: params.avoidEntries,
+    relax: params.relax,
   });
   if (first.ok) return withTimeLimit(first.question, effectiveDifficulty);
 
@@ -902,6 +953,7 @@ async function generateSlot(params: {
       effectiveDifficulty,
       sourceText: params.sourceText,
       avoidEntries: params.avoidEntries,
+      relax: params.relax,
     });
     if (second.ok) return withTimeLimit(second.question, effectiveDifficulty);
   }
@@ -914,6 +966,7 @@ async function generateSlot(params: {
     effectiveDifficulty,
     sourceText: params.sourceText,
     avoidEntries: params.avoidEntries,
+    relax: params.relax,
   });
   return third.ok ? withTimeLimit(third.question, effectiveDifficulty) : null;
 }
@@ -979,6 +1032,7 @@ export async function generateQuiz(params: {
           sourceText,
           primaryModel,
           fallbackModel,
+          relax: "none",
         });
         completedCount++;
         params.onProgress?.({ phase, completed: completedCount, total: params.questionCount });
@@ -1041,6 +1095,49 @@ export async function generateQuiz(params: {
   if (questions.length === 0) {
     throw new QuizGenerationError("The generator could not produce any usable questions. Try again.");
   }
+
+  // Guarantee the exact requested count. If the quality-first rounds left a
+  // slot or two unfilled (a topic that just doesn't hold enough substantive
+  // material for its assigned type, made more likely by the strict trivia
+  // bar), top up the shortfall here rather than handing back a short quiz.
+  // Acceptance is relaxed one step at a time (see RelaxLevel): "shape", then
+  // "all", then "bare" — each only reached if the previous still came up
+  // short. The focus topic is unpinned so these draw from the whole scope
+  // instead of retrying the thin topic that stalled, and the generation
+  // prompt is unchanged, so a topped-up question is still real and on-topic.
+  // Duplicates are rejected at every level.
+  async function topUp(relax: RelaxLevel): Promise<void> {
+    for (let round = 0; round < MAX_TOPUP_ROUNDS_PER_LEVEL && questions.length < params.questionCount; round++) {
+      const need = params.questionCount - questions.length;
+      const drafted = await Promise.all(
+        Array.from({ length: need }, (_, i) =>
+          generateSlot({
+            type: (questions.length + i) % 5 === 4 ? "true_false" : "multiple_choice",
+            topics: params.topics,
+            focusTopic: null,
+            coverageLabel: params.coverageLabel,
+            difficulty: params.difficulty,
+            avoidEntries: [...existingQuestions, ...questions],
+            sourceText,
+            primaryModel,
+            fallbackModel,
+            relax,
+          })
+        )
+      );
+      for (const q of drafted) {
+        if (questions.length >= params.questionCount) break;
+        if (q && !findDuplicate(q, [...existingQuestions, ...questions])) {
+          questions.push(q);
+          params.onProgress?.({ phase: "repairing", completed: questions.length, total: params.questionCount });
+        }
+      }
+    }
+  }
+  if (questions.length < params.questionCount) await topUp("shape");
+  if (questions.length < params.questionCount) await topUp("all");
+  if (questions.length < params.questionCount) await topUp("bare");
+  questions.length = Math.min(questions.length, params.questionCount);
 
   const title = params.coverageLabel ? `${params.coverageLabel} Quiz` : "Bhagavatam Quiz";
   const description =

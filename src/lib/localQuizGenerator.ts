@@ -131,12 +131,27 @@ const MAX_FILL_ROUNDS = 5;
 // Rounds run strictly sequentially — round N+1 can't start until round N's
 // full worker pool finishes and the cross-round duplicate sweep runs — so
 // unlike the per-round fill itself, this ceiling isn't sped up by
-// CONCURRENCY at all. Tested at 8: with CONCURRENCY=16, a 25-card/2-week
-// request's *draft* pass alone (round 0) reached 19-23 of 25 in under 20s,
-// but needing the full repair-round budget still pushed total time past
-// 100s. Tightened to 3 (draft + 2 repair passes) specifically to bound
-// wall-clock time, not just eventual fill-completeness.
-const MAX_ROUNDS_CEILING = 3;
+// CONCURRENCY at all.
+//
+// Was tightened to 3 in an attempt to hit a hard wall-clock target, but that
+// silently sacrificed fill-completeness: a stubborn 25-card/2-week request
+// (17 topics in scope) reliably came back at 14/25 because the loop below
+// (`indicesToFill.length > 0 && round < maxRounds`) already exits the
+// instant every slot fills — the ceiling only ever cuts a request *short*,
+// it's never the reason a request finishes faster than it otherwise would.
+// A user who picks "25 cards" expects 25 cards; a UI that silently hands
+// back 14 because of an internal round budget is a worse product than a
+// slower one that actually delivers what was asked. Reliable fill-count
+// takes priority over hitting a specific wall-clock number.
+//
+// Raised back up rather than removed outright: still a backstop against a
+// truly pathological scope (e.g. selecting all 7 weeks · all topics could
+// mean 50+ topics in play), which would otherwise be able to push maxRounds
+// — and therefore worst-case latency — arbitrarily high with no bound at
+// all. 20 comfortably covers any realistic 2-3 week "all topics" request
+// (topic counts observed: ~17 for two weeks) without truncating it early,
+// while still bounding the genuinely extreme case.
+const MAX_ROUNDS_CEILING = 20;
 
 export type GeneratedQuestion = {
   id: string;

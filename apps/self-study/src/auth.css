@@ -71,6 +71,30 @@
   text-align: left;
 }
 
+.auth-info {
+  margin: 4px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(46, 49, 146, .07);
+  color: var(--brand);
+  font-size: 13px;
+  text-align: left;
+}
+
+.auth-forgot {
+  display: block;
+  margin: -4px 0 14px auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.auth-forgot:hover { text-decoration: underline; }
+
 .auth-submit {
   width: 100%;
   justify-content: center;

@@ -115,11 +115,14 @@ const MAX_AVOID_ENTRIES_IN_PROMPT = 25;
 const MAX_SOURCE_TEXT_CHARS = 150_000;
 // Rounds of (re)generation attempted per slot before giving up on it —
 // covers both slots that produced nothing (all 3 attempts in generateSlot
-// failed) and slots knocked out by the cross-slot duplicate sweep. One
-// extra pass beyond the initial draft wasn't enough to reliably hit the
-// requested question count, especially for smaller quizzes where a single
-// dropped slot is a visible fraction of the total.
-const MAX_FILL_ROUNDS = 5;
+// failed) and slots knocked out by the cross-slot duplicate sweep. Raised
+// from 5 once the quality bar went up (no bare-count / list-membership /
+// non-verbatim-answer questions): with stricter rejection, a slot whose
+// assigned topic × type is a poor fit needs more rounds for the topic
+// rotation and one-time type flip to route it onto a combination that can
+// actually produce a substantive question, rather than the quiz coming
+// back short.
+const MAX_FILL_ROUNDS = 8;
 // Upper bound on maxRounds below, regardless of how many topics are in
 // scope. Without this, a broad multi-week "all topics" request (each week
 // contributes 6-9 topics — two weeks routinely means 15+) let maxRounds
@@ -229,9 +232,10 @@ const DIFFICULTY_SPEC: Record<EffectiveDifficulty, { writingInstruction: string;
       "PASSES only if the question is answerable by locating a single explicit statement in the source, with " +
       'no need to connect it to any other fact or interpret its significance. FAILS if it uses "why" / "how ' +
       'does X relate to Y" / "what does this signify" phrasing, or if answering it requires combining two ' +
-      "separate facts from the source. ALSO FAILS if the answer is a bare number or count, the expansion of a " +
-      "numbering code or abbreviation, the definition of a single term, or simply an item from a list the " +
-      "source enumerates — those are too trivial to ask even at this tier.",
+      "separate facts from the source. ALSO FAILS if the fact it tests is just a bare number or count " +
+      "(including a true/false statement that merely asserts a count), a numbering-code or abbreviation " +
+      "expansion, a single term's definition, or which items belong to a list the source enumerates — those " +
+      "are too trivial to ask even at this tier.",
   },
   intermediate: {
     writingInstruction:
@@ -538,10 +542,12 @@ function buildUserPrompt(params: {
       : `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}, phrased as a true/false statement.`,
     "Whatever the difficulty, the question must test something a student would have needed to actually " +
       "understand from the material — what someone did and the stated reason, the cause or outcome of an " +
-      "event, the relationship between two named figures, or the point a passage is making. Do NOT write a " +
-      'question whose answer is a bare number or count, the expansion of a numbering code or abbreviation (e.g. ' +
-      'what "1.2.23" stands for), the definition of a single term, or simply which name appears in a list the ' +
-      "source enumerates — those are not worth asking at any level."
+      "event, the relationship between two named figures, or the point a passage is making. Do NOT build the " +
+      "question around a bare number or count (e.g. how many cantos there are), the expansion of a numbering " +
+      'code or abbreviation (e.g. what "1.2.23" stands for), a single term\'s definition, or which items belong ' +
+      "to a list the source enumerates. This applies to true/false statements too — do not write one that just " +
+      "asserts a count, or that just asserts an item is (or isn't) in such a list. And for multiple choice, do " +
+      "not write a question where more than one of the four choices is a true statement from the source."
   );
 
   if (params.avoidEntries.length > 0) {

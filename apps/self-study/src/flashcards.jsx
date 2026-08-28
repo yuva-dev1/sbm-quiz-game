@@ -452,8 +452,8 @@ function DeckViewer({ cards, contextLabel, onRegenerate, isGenerating, onSave, s
 
 function FlashcardSetsPanel({ sets, isLoading, error, onOpenSet }) {
   if (isLoading) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2>Loading your saved sets...</h2></div>;
-  if (error) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2>Couldn't load your sets</h2><p>{error}</p></div>;
-  if (!sets.length) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2>No saved sets yet</h2><p>Generate a deck and tap "Save this set" to see it here.</p></div>;
+  if (error) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2>Couldn&apos;t load your sets</h2><p>{error}</p></div>;
+  if (!sets.length) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2>No saved sets yet</h2><p>Generate a deck and tap &quot;Save this set&quot; to see it here.</p></div>;
 
   return (
     <div className="flashcard-sets-list">

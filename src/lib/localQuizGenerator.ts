@@ -12,13 +12,18 @@
  * Each question slot gets its own model call so one bad response only costs
  * a single question, with a retry ladder per slot: primary model -> repair
  * retry (same model, shown its own bad output and, if the failure was low
- * faithfulness or a duplicate, told so) -> fallback model. The faithfulness
- * judge is always the *other* model from whichever one drafted the
- * candidate, so a model never grades its own output. Slots left empty (or
- * knocked out by the cross-slot duplicate sweep) after a pass are re-run in
- * a further pass, looping until every slot is filled or MAX_FILL_ROUNDS is
- * hit — a single extra pass wasn't enough headroom to reliably reach the
- * requested question count for smaller quizzes.
+ * faithfulness or a duplicate, told so) -> fallback model. On the
+ * "openrouter" backend the faithfulness judge is always the *other* model
+ * from whichever one drafted the candidate, so a model never grades its own
+ * output; on the default "local" backend there is only one model, so it
+ * grades its own draft — and the difficulty-tier and single-defensible-answer
+ * judges (checkDifficultyMatch / checkAnswerable) are skipped there entirely
+ * (weak signal from a 4B self-review, and a flaky self-"fail" only costs a
+ * wasted repair round). Slots left empty (or knocked out by the cross-slot
+ * duplicate sweep) after a pass are re-run in a further pass, looping until
+ * every slot is filled or MAX_FILL_ROUNDS is hit — a single extra pass
+ * wasn't enough headroom to reliably reach the requested question count for
+ * smaller quizzes.
  * Restricted to multiple_choice/true_false — the only types the live tap
  * UI can render (see Answer model's comment in schema.prisma).
  *
@@ -815,16 +820,25 @@ async function attemptDraft(params: {
   //   shape → faithfulness + difficulty tier
   //   none  → all three (they're independent, so they run concurrently
   //           rather than as three back-to-back round trips)
+  //
+  // The "local" backend additionally skips the difficulty-tier and
+  // single-defensible-answer judges entirely: they'd be a 4B model grading
+  // its own draft (primary == judge in that mode), which is weak signal and,
+  // worse, a flaky self-"fail" here triggers a wasted repair round trip —
+  // roughly half the per-slot model calls for little benefit. Faithfulness
+  // still runs (it's a distinct RAGAS metric, not a yes/no self-review) and
+  // still fails open + logs if the small model can't complete it.
   if (params.relax === "bare") {
     return { ok: true, question: parsed };
   }
 
-  const runDifficulty = params.relax === "none" || params.relax === "shape";
-  const runAnswerable = params.relax === "none";
-  const claim = `Question: ${parsed.question}\nAnswer: ${parsed.answer}\nExplanation: ${parsed.explanation}`;
+  const selfJudgeOnly = llmBackend() === "local";
+  const runDifficulty = !selfJudgeOnly && (params.relax === "none" || params.relax === "shape");
+  const runAnswerable = !selfJudgeOnly && params.relax === "none";
+  const answerClaim = `${parsed.answer}. ${parsed.explanation}`;
   const [difficultyMatches, faithfulness, answerable] = await Promise.all([
     runDifficulty ? checkDifficultyMatch(parsed, params.effectiveDifficulty, params.judgeModel) : Promise.resolve(null),
-    scoreFaithfulness(claim, params.sourceText, params.judgeModel),
+    scoreFaithfulness(parsed.question, answerClaim, params.sourceText, params.judgeModel),
     runAnswerable && parsed.type === "multiple_choice"
       ? checkAnswerable(parsed, params.sourceText, params.judgeModel)
       : Promise.resolve(null),

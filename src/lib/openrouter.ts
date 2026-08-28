@@ -1,11 +1,15 @@
 /**
- * Thin client for OpenRouter's OpenAI-compatible chat-completions endpoint.
- * No SDK — OpenRouter's API is a straight superset of the OpenAI schema, so
- * a single fetch call is simpler than pulling in a dependency for it.
+ * Thin client for an OpenAI-compatible chat-completions endpoint. No SDK —
+ * the schema is a straight superset of OpenAI's, so a single fetch call is
+ * simpler than a dependency.
+ *
+ * Which endpoint it hits is decided entirely by LLM_BACKEND (see
+ * llmBackend.ts): the self-hosted server (default) or OpenRouter. The name
+ * "openrouter" / "OpenRouterError" is kept for continuity with callers —
+ * despite it, this fronts whichever backend is configured.
  */
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const REQUEST_TIMEOUT_MS = 30_000;
+import { llmClientConfig } from "@/lib/llmBackend";
 
 export type ChatMessage = { role: "system" | "user"; content: string };
 
@@ -23,22 +27,20 @@ export class OpenRouterError extends Error {
  * back, since "valid JSON" and "matches our schema" are different things.
  */
 export async function completeChat(model: string, messages: ChatMessage[]): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new OpenRouterError("OPENROUTER_API_KEY is not set.");
+  const { backend, baseURL, apiKey, apiKeyEnvHint, timeoutMs, extraHeaders } = llmClientConfig();
+  if (!apiKey) throw new OpenRouterError(`${apiKeyEnvHint} is not set.`);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let response: Response;
   try {
-    response = await fetch(OPENROUTER_URL, {
+    response = await fetch(`${baseURL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
-        // OpenRouter uses these purely for its own leaderboards/analytics.
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "https://bhagavatham-quiz-game",
-        "X-Title": "Bhagavatam Quiz Live",
+        ...extraHeaders,
       },
       body: JSON.stringify({
         model,
@@ -51,8 +53,8 @@ export async function completeChat(model: string, messages: ChatMessage[]): Prom
   } catch (error) {
     throw new OpenRouterError(
       error instanceof Error && error.name === "AbortError"
-        ? `OpenRouter request to ${model} timed out.`
-        : `Could not reach OpenRouter: ${error instanceof Error ? error.message : String(error)}`
+        ? `LLM request to ${model} timed out after ${timeoutMs}ms.`
+        : `Could not reach the ${backend} LLM endpoint: ${error instanceof Error ? error.message : String(error)}`
     );
   } finally {
     clearTimeout(timeout);
@@ -60,11 +62,11 @@ export async function completeChat(model: string, messages: ChatMessage[]): Prom
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new OpenRouterError(`OpenRouter returned HTTP ${response.status} for ${model}: ${body.slice(0, 300)}`);
+    throw new OpenRouterError(`LLM endpoint returned HTTP ${response.status} for ${model}: ${body.slice(0, 300)}`);
   }
 
   const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
   const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new OpenRouterError(`OpenRouter returned no content for ${model}.`);
+  if (!content) throw new OpenRouterError(`LLM endpoint returned no content for ${model}.`);
   return content;
 }

@@ -94,6 +94,7 @@ function validDraftFor(messages: ChatMessage[]): string {
 
 describe("generateQuiz", () => {
   const originalFallback = process.env.OPENROUTER_MODEL_FALLBACK;
+  const originalBackend = process.env.LLM_BACKEND;
 
   beforeEach(() => {
     draftCounter = 0;
@@ -108,6 +109,8 @@ describe("generateQuiz", () => {
     scoreFaithfulnessMock.mockReset();
     if (originalFallback === undefined) delete process.env.OPENROUTER_MODEL_FALLBACK;
     else process.env.OPENROUTER_MODEL_FALLBACK = originalFallback;
+    if (originalBackend === undefined) delete process.env.LLM_BACKEND;
+    else process.env.LLM_BACKEND = originalBackend;
   });
 
   it("generates exactly questionCount questions when every model call succeeds", async () => {
@@ -152,6 +155,9 @@ describe("generateQuiz", () => {
   });
 
   it("falls back to the second model and still succeeds when the primary model never returns valid JSON", async () => {
+    // Two distinct draft models only exist on the "openrouter" backend; the
+    // default "local" backend serves one model for every ladder rung.
+    process.env.LLM_BACKEND = "openrouter";
     process.env.OPENROUTER_MODEL_FALLBACK = "fallback/model";
     completeChatMock.mockImplementation(async (model: string, messages: ChatMessage[]) => {
       if (model === "fallback/model") return validDraftFor(messages);

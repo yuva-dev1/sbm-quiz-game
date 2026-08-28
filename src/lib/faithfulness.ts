@@ -3,22 +3,29 @@
  * course-note text it was supposed to be grounded in, using autoevals'
  * (https://github.com/braintrustdata/autoevals) RAGAS-style Faithfulness
  * metric — an LLM-as-judge check for whether the claim's assertions appear
- * in the source, not just whether they sound plausible. Points at
- * OpenRouter (OpenAI-compatible) so the judge call uses the same key/budget
- * as generation itself.
+ * in the source, not just whether they sound plausible.
+ *
+ * The judge runs on whatever LLM_BACKEND selects (see llmBackend.ts): the
+ * self-hosted endpoint (default) or OpenRouter. In the default "local" mode
+ * the judge model IS the drafter model (one 4B model on the box) — a model
+ * grading its own output is more lenient than an independent judge, and
+ * autoevals' Faithfulness prompt doesn't always parse cleanly against a
+ * model that small. When the judge call fails or returns no numeric score,
+ * scoreFaithfulness fails open (returns null → the caller skips the check)
+ * and logs it, so a validator outage never silently drops an otherwise-good
+ * question and the skipped-check rate stays visible in Cloud Run logs.
  */
 
 import OpenAI from "openai";
 import { Faithfulness } from "autoevals";
-
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+import { llmClientConfig } from "@/lib/llmBackend";
 
 let client: OpenAI | null = null;
 function getClient(): OpenAI {
   if (!client) {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set.");
-    client = new OpenAI({ apiKey, baseURL: OPENROUTER_BASE_URL });
+    const { baseURL, apiKey, apiKeyEnvHint } = llmClientConfig();
+    if (!apiKey) throw new Error(`${apiKeyEnvHint} is not set.`);
+    client = new OpenAI({ apiKey, baseURL });
   }
   return client;
 }
@@ -39,8 +46,17 @@ export async function scoreFaithfulness(claim: string, sourceText: string, judge
       model: judgeModel,
       client: getClient(),
     });
-    return typeof result.score === "number" ? result.score : null;
-  } catch {
+    if (typeof result.score === "number") return result.score;
+    console.warn(
+      `[faithfulness] judge "${judgeModel}" returned no numeric score — failing open, grounding check skipped ` +
+        `for this question (autoevals' Faithfulness can fail to parse against a small local model).`
+    );
+    return null;
+  } catch (error) {
+    console.warn(
+      `[faithfulness] judge "${judgeModel}" call failed — failing open, grounding check skipped for this ` +
+        `question: ${error instanceof Error ? error.message : String(error)}`
+    );
     return null;
   }
 }

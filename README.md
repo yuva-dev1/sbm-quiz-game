@@ -45,23 +45,32 @@ npm run docker:down
 
 The host generates quizzes from `/host` by picking a class week (or several)
 and topic(s). Generation is entirely in-house
-(`src/lib/localQuizGenerator.ts`): each question is its own call to an LLM
-via [OpenRouter](https://openrouter.ai) (`openai/gpt-4o-mini` by default,
-falling back to `google/gemini-2.5-flash` on a repair retry), scoped to the
-selected week/topic via this app's own catalog (`src/data/courseCatalog.json`,
-regenerated with `python scripts/build_course_catalog.py` from
-`course-materials/raw/` — see that script's docstring).
+(`src/lib/localQuizGenerator.ts`): each question is its own call to an LLM,
+scoped to the selected week/topic via this app's own catalog
+(`src/data/courseCatalog.json`, regenerated with
+`python scripts/build_course_catalog.py` from `course-materials/raw/` — see
+that script's docstring).
+
+Which LLM is a single switch, `LLM_BACKEND` (see `docs/self-hosted-llm.md`).
+Unset it defaults to **`local`**: every generation and grading call goes to
+a self-hosted OpenAI-compatible endpoint (`LLM_BASE_URL`, one model
+`qwen3-4b-local`), with no fallback to anything else. `LLM_BACKEND=openrouter`
+opts into [OpenRouter](https://openrouter.ai) instead (`openai/gpt-4o-mini`
+by default, falling back to `google/gemini-2.5-flash` on a repair retry).
 
 Each question is grounded in the actual course-note text for the selected
 week(s) — `src/data/courseNotes.json` (regenerated with
 `node scripts/build_course_notes.mjs` from `content/course-notes/`) is
 included directly in the generation prompt, and every candidate is scored
 against it with [autoevals](https://github.com/braintrustdata/autoevals)'
-RAGAS-style `Faithfulness` metric (`src/lib/faithfulness.ts`, LLM-as-judge,
-using whichever of the two models *didn't* write the question) before it's
-accepted — below a 0.7 score, it's treated like any other validation
-failure in the retry ladder (repair retry, then fallback model, then the
-slot is dropped rather than kept).
+RAGAS-style `Faithfulness` metric (`src/lib/faithfulness.ts`, LLM-as-judge)
+before it's accepted — below a 0.7 score, it's treated like any other
+validation failure in the retry ladder (repair retry, then fallback model,
+then the slot is dropped rather than kept). On `openrouter` the judge is
+whichever of the two models *didn't* write the question; on `local` there is
+only one model, so it grades its own output (and `Faithfulness` sometimes
+can't parse a 4B model's response, in which case the check fails open and is
+skipped — logged either way). See `docs/self-hosted-llm.md`.
 
 The same generator is also exposed as a standalone backend endpoint,
 `POST /generate-quiz` (`src/app/generate-quiz/route.ts`), for other services
@@ -75,7 +84,7 @@ plain JSON.
 This app owns its own `quizzes`/`questions` Firestore collections — a
 generated quiz is saved as a draft, previewed, and Published before it can be
 turned into a live session. `/host` and all of `/api/quizzes/*` (which now
-spends the app's own OpenRouter budget on generation) sit behind a shared
+runs generation on the app's own LLM backend) sit behind a shared
 passcode (`HOST_PASSCODE`).
 
 ## Deployment
@@ -100,9 +109,14 @@ never share credentials.
 6. **`SESSION_SECRET`**: signs the host's session cookie. Generate a fresh
    one for prod (`openssl rand -base64 32`) — do not reuse the local dev
    value.
-7. **`OPENROUTER_API_KEY`**: an [OpenRouter](https://openrouter.ai/keys) key
-   for quiz generation. `OPENROUTER_MODEL_PRIMARY`/`OPENROUTER_MODEL_FALLBACK`
-   are optional overrides of the built-in model defaults. **`GENERATE_QUIZ_API_KEY`**:
+7. **LLM backend**: `LLM_BACKEND` unset (or `local`) is the default and
+   needs **`LLM_API_KEY`** set (the self-hosted endpoint's bearer token — a
+   Cloud Run secret, never committed); `LLM_BASE_URL`, `LLM_MODEL`,
+   `LLM_TIMEOUT_MS`, `LLM_CONCURRENCY`, `LLM_TOPUP_CONCURRENCY` have working
+   defaults. Set `LLM_BACKEND=openrouter` to use OpenRouter instead, which
+   then needs **`OPENROUTER_API_KEY`** (`OPENROUTER_MODEL_PRIMARY`/
+   `OPENROUTER_MODEL_FALLBACK` are optional overrides). Full details and the
+   toggle steps: `docs/self-hosted-llm.md`. **`GENERATE_QUIZ_API_KEY`**:
    a random shared secret (`openssl rand -base64 32`) other services must
    present as a bearer token to call `POST /generate-quiz` — do not reuse
    any other secret for this.

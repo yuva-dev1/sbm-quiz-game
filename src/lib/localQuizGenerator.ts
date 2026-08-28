@@ -65,23 +65,16 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { completeChat, type ChatMessage } from "@/lib/openrouter";
 import { scoreFaithfulness } from "@/lib/faithfulness";
+import { llmBackend, generationModels, generationConcurrency } from "@/lib/llmBackend";
 import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS, DEFAULT_TIME_LIMIT_SECS } from "@/lib/timeLimits";
 
-const DEFAULT_PRIMARY_MODEL = "openai/gpt-4o-mini";
-const DEFAULT_FALLBACK_MODEL = "google/gemini-2.5-flash";
-// Was 4, tested clean at 8 (82.5s for a 25-card/2-week request that took
-// 302s at 4, zero errors/warnings in Cloud Run logs during the run) — no
-// documented OpenRouter rate-limit tier for this key and no retry/backoff
-// on a 429 (see openrouter.ts's completeChat), so this is empirical, not a
-// guess, and still being pushed incrementally rather than jumping blind.
-//
-// fillRound's workerCount is `Math.min(CONCURRENCY, indices.length)` (see
-// generateQuiz below), so this never spawns more workers than there are
-// slots to fill in a round — raising it past the largest allowed
-// questionCount (35, see ALLOWED_QUESTION_COUNTS) buys nothing further.
-// 32 specifically lets a 25-30 card draft round run as a single wave
-// instead of two (16 was already splitting a 25-slot draft into 16 + 9).
-const CONCURRENCY = 32;
+// Draft models and concurrency are backend-dependent and resolved per call
+// in generateQuiz (see @/lib/llmBackend): the "openrouter" backend keeps the
+// gpt-4o-mini + gemini fallback at 32/16 parallel calls tuned here over
+// several Cloud Run runs (25-card/2-week draft as a single wave, no 429s);
+// the default "local" backend serves one model on one GPU, so both ladder
+// rungs are that same model and concurrency drops to LLM_CONCURRENCY (3).
+
 // Target share of a quiz that's true/false, the rest multiple_choice. Held
 // to an exact per-quiz quota (see assignQuestionTypes) rather than a
 // per-question coin flip — QA feedback was that quizzes were landing with
@@ -148,13 +141,14 @@ const MAX_ROUNDS_CEILING = 3;
 // guaranteed to land on its exact difficulty tier. This is what makes
 // "8 means 8" hold without raising the wall-clock ceiling above.
 const MAX_TOPUP_ROUNDS_PER_LEVEL = 3;
-// The top-up runs on a much smaller worker pool than the main fill
-// (CONCURRENCY) and each relaxed slot is a single draft attempt rather than
-// the primary→repair→fallback ladder. Both keep a large-count top-up from
-// holding hundreds of in-flight OpenRouter responses at once — that memory
-// spike (plus the extra wall-clock) is what tipped a 25-card request over
-// the quiz service's limits and surfaced as an outright generation failure.
-const TOPUP_CONCURRENCY = 16;
+// The top-up runs on a much smaller worker pool than the main fill and each
+// relaxed slot is a single draft attempt rather than the
+// primary→repair→fallback ladder. Both keep a large-count top-up from
+// holding hundreds of in-flight responses at once — that memory spike (plus
+// the extra wall-clock) is what tipped a 25-card request over the quiz
+// service's limits and surfaced as an outright generation failure. The pool
+// size itself is backend-dependent (16 for "openrouter", LLM_TOPUP_CONCURRENCY
+// — default 3 — for "local"); see generationConcurrency in @/lib/llmBackend.
 // Hard wall-clock budget for the whole relaxed top-up across all three
 // levels — a genuinely thin scope (a single light week asked for 25+ cards)
 // returns a little short rather than grinding until the request is killed
@@ -993,6 +987,23 @@ function withTimeLimit(question: GeneratedQuestion, effectiveDifficulty: Effecti
   return { ...question, timeLimitSecs: computeTimeLimitSecs(question, effectiveDifficulty) };
 }
 
+// In the default "local" backend one model on the self-hosted box drafts
+// AND grades every question — primary == fallback == the faithfulness,
+// answerable and difficulty-match judges. Self-grading is more lenient than
+// an independent judge; it's an accepted limitation of running fully local
+// with a single 4B model (there is no second model on the endpoint). Logged
+// once per process so the trade-off is visible in Cloud Run logs without
+// spamming a line per generation.
+let localSelfJudgeLogged = false;
+function logLocalSelfJudgeOnce(model: string): void {
+  if (localSelfJudgeLogged) return;
+  localSelfJudgeLogged = true;
+  console.warn(
+    `[localQuizGenerator] LLM_BACKEND=local: "${model}" on the self-hosted endpoint drafts and grades every ` +
+      `question (primary == fallback == all judges). Self-grading runs more lenient than an independent judge.`
+  );
+}
+
 export async function generateQuiz(params: {
   topics: string[];
   sourceText: string;
@@ -1004,8 +1015,9 @@ export async function generateQuiz(params: {
    * avoid-list beyond just this run's own in-batch questions. */
   existingQuestions?: GeneratedQuestion[];
 }): Promise<GeneratedQuiz> {
-  const primaryModel = process.env.OPENROUTER_MODEL_PRIMARY || DEFAULT_PRIMARY_MODEL;
-  const fallbackModel = process.env.OPENROUTER_MODEL_FALLBACK || DEFAULT_FALLBACK_MODEL;
+  const { primaryModel, fallbackModel } = generationModels();
+  const { concurrency, topupConcurrency } = generationConcurrency();
+  if (llmBackend() === "local") logLocalSelfJudgeOnce(primaryModel);
   const sourceText = clampSourceText(params.sourceText);
   const existingQuestions = params.existingQuestions ?? [];
 
@@ -1056,7 +1068,7 @@ export async function generateQuiz(params: {
         params.onProgress?.({ phase, completed: completedCount, total: params.questionCount });
       }
     }
-    const workerCount = Math.min(CONCURRENCY, indices.length);
+    const workerCount = Math.min(concurrency, indices.length);
     await Promise.all(Array.from({ length: workerCount }, worker));
   }
 
@@ -1156,7 +1168,7 @@ export async function generateQuiz(params: {
           );
         }
       };
-      await Promise.all(Array.from({ length: Math.min(TOPUP_CONCURRENCY, need) }, worker));
+      await Promise.all(Array.from({ length: Math.min(topupConcurrency, need) }, worker));
 
       for (const q of drafted) {
         if (questions.length >= params.questionCount) break;

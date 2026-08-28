@@ -36,13 +36,22 @@ export function pickQuoteCount(questionCount: number): number {
 export function assignQuotePositions(questionCount: number, quoteCount: number): number[] {
   if (quoteCount <= 0 || questionCount <= 1) return [];
 
+  const lastPosition = questionCount - 1;
   const segmentSize = (questionCount - 1) / quoteCount;
   const positions: number[] = [];
   for (let i = 0; i < quoteCount; i++) {
     const segmentStart = 1 + i * segmentSize;
     const segmentEnd = 1 + (i + 1) * segmentSize;
-    const position = Math.floor(segmentStart + Math.random() * (segmentEnd - segmentStart));
-    positions.push(Math.min(position, questionCount - 1));
+    const picked = Math.floor(segmentStart + Math.random() * (segmentEnd - segmentStart));
+    // Force positions to be strictly increasing and distinct: adjacent
+    // segments can round to the same boundary integer, and buildQuoteAssignment
+    // keys a Map by position — a collision there silently drops a quote, so
+    // it would hand back fewer than pickQuoteCount promised. `floor` is the
+    // lowest still-free slot; `ceiling` leaves room for the remaining
+    // segments to each still get their own slot before the last question.
+    const floor = i === 0 ? 1 : positions[i - 1] + 1;
+    const ceiling = lastPosition - (quoteCount - 1 - i);
+    positions.push(Math.min(ceiling, Math.max(floor, Math.min(picked, lastPosition))));
   }
   return positions;
 }

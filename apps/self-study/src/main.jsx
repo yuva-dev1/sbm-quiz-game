@@ -505,7 +505,7 @@ function QuizHistoryPanel({ attempts, isLoading, error, onOpenAttempt }) {
   if (error) {
     return (
       <section className="preview-panel" aria-labelledby="history-title">
-        <div className="preview-header"><div><p className="eyebrow gold">Your history</p><h2 id="history-title">Couldn't load your history</h2></div></div>
+        <div className="preview-header"><div><p className="eyebrow gold">Your history</p><h2 id="history-title">Couldn&apos;t load your history</h2></div></div>
         <p className="submit-warning" role="alert"><CircleHelp size={15} /> {error}</p>
       </section>
     );
@@ -514,14 +514,14 @@ function QuizHistoryPanel({ attempts, isLoading, error, onOpenAttempt }) {
     return (
       <section className="preview-panel" aria-labelledby="history-title">
         <div className="preview-header"><div><p className="eyebrow gold">Your history</p><h2 id="history-title">No quizzes taken yet</h2></div></div>
-        <p>Submit a quiz and it'll show up here.</p>
+        <p>Submit a quiz and it&apos;ll show up here.</p>
       </section>
     );
   }
   return (
     <section className="preview-panel" aria-labelledby="history-title">
       <div className="preview-header">
-        <div><p className="eyebrow gold">Your history</p><h2 id="history-title">Quizzes you've taken</h2></div>
+        <div><p className="eyebrow gold">Your history</p><h2 id="history-title">Quizzes you&apos;ve taken</h2></div>
         <span className="preview-count"><span>{attempts.length}</span> attempts</span>
       </div>
       <div className="missed-list">

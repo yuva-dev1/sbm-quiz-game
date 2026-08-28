@@ -58,6 +58,27 @@ describe("assignQuotePositions", () => {
   it("returns nothing when quoteCount is 0", () => {
     expect(assignQuotePositions(10, 0)).toEqual([]);
   });
+
+  it("returns quoteCount distinct positions on every run (adjacent segments must not collide)", () => {
+    // assignQuotePositions is random; adjacent segments used to be able to
+    // round to the same boundary integer, which made buildQuoteAssignment's
+    // position-keyed Map silently drop a quote. Hammer the tightest ratios.
+    for (let run = 0; run < 500; run++) {
+      for (const [questionCount, quoteCount] of [
+        [15, 4],
+        [8, 7],
+        [9, 7],
+        [30, 7],
+        [12, 7],
+      ] as const) {
+        const positions = assignQuotePositions(questionCount, quoteCount);
+        expect(positions).toHaveLength(quoteCount);
+        expect(new Set(positions).size).toBe(quoteCount);
+        expect(Math.min(...positions)).toBeGreaterThanOrEqual(1);
+        expect(Math.max(...positions)).toBeLessThanOrEqual(questionCount - 1);
+      }
+    }
+  });
 });
 
 describe("pickRandomQuotes", () => {
@@ -76,12 +97,17 @@ describe("pickRandomQuotes", () => {
 
 describe("buildQuoteAssignment", () => {
   it("produces exactly pickQuoteCount entries, keyed by valid question positions", () => {
-    const questionCount = 15;
-    const assignment = buildQuoteAssignment(questionCount);
-    expect(assignment.size).toBe(pickQuoteCount(questionCount));
-    for (const position of assignment.keys()) {
-      expect(position).toBeGreaterThanOrEqual(1);
-      expect(position).toBeLessThanOrEqual(questionCount - 1);
+    // Loop: buildQuoteAssignment is random and used to intermittently return
+    // fewer entries than pickQuoteCount when two positions collided.
+    for (let run = 0; run < 300; run++) {
+      for (const questionCount of [8, 12, 15, 19, 23, 30]) {
+        const assignment = buildQuoteAssignment(questionCount);
+        expect(assignment.size).toBe(pickQuoteCount(questionCount));
+        for (const position of assignment.keys()) {
+          expect(position).toBeGreaterThanOrEqual(1);
+          expect(position).toBeLessThanOrEqual(questionCount - 1);
+        }
+      }
     }
   });
 

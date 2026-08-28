@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return Response.json({ error: parsed.error }, { status: parsed.status });
   }
-  const { questionCount, difficulty, scopeTopics, coverageLabel, sourceText, existingQuestions } = parsed.value;
+  const { questionCount, difficulty, scopeTopics, coverageLabel, sourceText, topicSourceText, existingQuestions } = parsed.value;
 
   const wantsStream = (request.headers.get("accept") ?? "").includes("text/event-stream");
   if (!wantsStream) {
@@ -40,6 +40,7 @@ export async function POST(request: Request) {
       const quiz = await generateQuiz({
         topics: scopeTopics,
         sourceText,
+        topicSourceText,
         questionCount,
         difficulty,
         coverageLabel,
@@ -71,6 +72,7 @@ export async function POST(request: Request) {
         const quiz = await generateQuiz({
           topics: scopeTopics,
           sourceText,
+          topicSourceText,
           questionCount,
           difficulty,
           coverageLabel,

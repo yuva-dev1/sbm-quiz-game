@@ -4,12 +4,11 @@
 
 `getSourceText` used to take only week ids and return the concatenation of
 **every** source document for **every** selected week. That whole blob was then
-handed to `generateQuiz`, which passes it unchanged into every model call —
-every draft, every repair, and every judge call (`scoreFaithfulness`,
-`checkAnswerable`). A 25-question quiz makes 100–300 such calls, so picking a
-single topic still re-uploaded the entire week (or, for "all weeks", the entire
-~21k-token course corpus) hundreds of times. That was the dominant cost in
-300-second generations.
+handed to `generateQuiz`, which passed it unchanged into every model call —
+every draft, every repair, and every judge call. A 25-question quiz makes
+100–300 such calls, so picking a single topic still re-uploaded the entire week
+(or, for "all weeks", the entire ~21k-token course corpus) hundreds of times.
+That was the dominant cost in 300-second generations.
 
 The topic picker on `/host` narrowed the *topic labels* fed to the prompt
 (`resolveGenerationScope`) but not the grounding text. This change makes topic
@@ -31,26 +30,31 @@ Adding a new week: after curating its topic list in `courseCatalog.json`, add a
 that week's notes. An excerpt can be reused across two closely-related topics;
 `getSourceText` de-dupes identical passages when it concatenates.
 
-## How `getSourceText` uses it
+## Two consumers
 
-`getSourceText(weeks, weekIds, topics?)`:
+### `getSourceText(weeks, weekIds, topics?)` — the run-wide fallback
 
-- No `topics` (host picked "All topics") → full notes for each selected week,
-  exactly as before.
+- No `topics` (host picked "All topics") → full notes for each selected week.
 - `topics` given → for each week, concatenate just the excerpts for that week's
   selected topics. A week falls back to its full notes when **every** one of its
   topics was selected anyway, when it has no index block, or when the selected
   topics resolve to less than `MIN_TOPIC_SCOPE_CHARS` (4000) of text.
 
-`MIN_TOPIC_SCOPE_CHARS` is deliberately high. A handful of topics from a single
-week still clears the week's own full-notes size, so scoping only actually
-narrows anything for large selections (many topics, or several weeks at once) —
-which is the only case where the un-scoped text was ever a real latency problem.
-An earlier value of 600 let a two-topic pick hand the model a few hundred
-characters and still ask for 8 questions; it came back with 5 shallow ones.
+`generateQuizRequest.ts` now always calls this with `topics: null` — it's the
+whole-selection text handed to `generateQuiz` as `sourceText`, used only as the
+fallback when a slot's focus topic has no index entry.
 
-`generateQuizRequest.ts` only passes the resolved `scopeTopics` when
-**`mode === "SELF_PACED"`** and the request actually named topics. A `LIVE`
-(Kahoot) quiz always gets the full week's notes — topic-scoping can never change
-what a live session serves. An empty topic list ("all topics") stays on the
-full-week path in both modes.
+### `getTopicSourceText(weeks, weekIds, topics?)` — per-slot grounding
+
+Returns `{ <exact catalog topic>: <excerpt> }` for every in-scope topic. Unlike
+`getSourceText` it does **not** collapse to full-week text when every topic is
+selected — the point is that each generation and judge call sees only its one
+slot's passage. `localQuizGenerator` builds each slot's grounding text from its
+`focusTopic`'s entry (plus a sibling passage or two to clear a small floor),
+and the unpinned relaxed top-up from the union of all in-scope passages.
+
+`generateQuizRequest.ts` passes this for **every** quiz, LIVE and SELF_PACED
+alike. A slot still sees real, on-topic source text, and the verbatim /
+faithfulness checks run against exactly that per-slot text, so grounding is
+narrowed per question, never weakened. See `docs/self-hosted-llm.md` for why
+this is the single biggest latency lever on the self-hosted backend.

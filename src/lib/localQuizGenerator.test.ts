@@ -2,15 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "@/lib/openrouter";
 
 const completeChatMock = vi.fn();
-const scoreFaithfulnessMock = vi.fn();
+const judgeQuestionMock = vi.fn();
 
 vi.mock("@/lib/openrouter", () => ({
-  completeChat: (...args: [string, ChatMessage[]]) => completeChatMock(...args),
+  completeChat: (...args: [string, ChatMessage[], string?]) => completeChatMock(...args),
   OpenRouterError: class OpenRouterError extends Error {},
 }));
 
+// The three separate judge round-trips (faithfulness / answerable /
+// difficulty) are now one combined call — faithfulness.ts's judgeQuestion,
+// returning { faithful, answerable, difficultyMatch, reason } (any subset
+// null when not asked for or on a fail-open).
 vi.mock("@/lib/faithfulness", () => ({
-  scoreFaithfulness: (...args: [string, string, string, string]) => scoreFaithfulnessMock(...args),
+  judgeQuestion: (...args: [Record<string, unknown>]) => judgeQuestionMock(...args),
 }));
 
 function requestedType(messages: ChatMessage[]): "multiple_choice" | "true_false" {
@@ -18,18 +22,12 @@ function requestedType(messages: ChatMessage[]): "multiple_choice" | "true_false
   return userContent.includes('"type":"true_false"') ? "true_false" : "multiple_choice";
 }
 
-// checkAnswerable() reuses completeChat (same mock as drafting calls) rather
-// than a separate module like faithfulness, so tests distinguish it by the
-// one phrase only its own prompt contains.
-function isAnswerabilityCheck(messages: ChatMessage[]): boolean {
-  return (messages.find((m) => m.role === "user")?.content ?? "").includes("Marked correct answer:");
-}
-
-// Same pattern as isAnswerabilityCheck — checkDifficultyMatch() also reuses
-// completeChat, distinguished by the one phrase only its own prompt contains.
-function isDifficultyCheck(messages: ChatMessage[]): boolean {
-  return (messages.find((m) => m.role === "user")?.content ?? "").includes("Target difficulty tier:");
-}
+// Every grounded test builds its sourceText to contain this exact phrase so
+// validDraftFor's cited source_excerpt passes the verbatim check — while
+// deliberately NOT containing the MC answers below, so the grounding
+// short-circuit (verbatim excerpt + verbatim answer => skip the judge) does
+// not fire and judgeQuestion is actually consulted.
+const SOURCE_EXCERPT = "a sentence copied verbatim from the course notes";
 
 // Each call cycles through genuinely distinct facts (not just a numeric
 // suffix — normalizeWords drops words of length <= 3, including bare
@@ -59,21 +57,7 @@ const TRUE_FALSE_CORE_FACTS = [
 ];
 let draftCounter = 0;
 function validDraftFor(messages: ChatMessage[]): string {
-  // checkAnswerable() also goes through completeChat — default it to a
-  // benign pass so tests that aren't specifically about answerability don't
-  // need to think about it, and (just as importantly) so it doesn't consume
-  // a draftCounter tick and throw off which fact each real draft call gets.
-  if (isAnswerabilityCheck(messages)) {
-    return JSON.stringify({ answerable: true, reason: "fine" });
-  }
-  if (isDifficultyCheck(messages)) {
-    return JSON.stringify({ matches: true, reason: "fine" });
-  }
   const index = draftCounter++ % MULTIPLE_CHOICE_FACTS.length;
-  // Verbatim within the one grounded sourceText any of these tests use (see
-  // the faithfulness-check tests below) — harmless filler for every other
-  // test here, which passes sourceText: "" and so never checks this field.
-  const sourceExcerpt = "Sukadeva Goswami, Vyasa, Sukadeva, Pariksit, and Shringi";
   if (requestedType(messages) === "true_false") {
     return JSON.stringify({
       type: "true_false",
@@ -81,16 +65,23 @@ function validDraftFor(messages: ChatMessage[]): string {
       answer: "True",
       explanation: "Because.",
       core_fact: TRUE_FALSE_CORE_FACTS[index],
-      source_excerpt: sourceExcerpt,
+      source_excerpt: SOURCE_EXCERPT,
     });
   }
   return JSON.stringify({
     type: "multiple_choice",
     ...MULTIPLE_CHOICE_FACTS[index],
     explanation: "Because.",
-    source_excerpt: sourceExcerpt,
+    source_excerpt: SOURCE_EXCERPT,
   });
 }
+
+/** sourceText that passes validDraftFor's verbatim source_excerpt check
+ *  without containing any MC answer (so the grounding short-circuit stays
+ *  off and judgeQuestion is exercised). */
+const GROUNDED_SOURCE = `Overview of the week's material. ${SOURCE_EXCERPT}. Further supporting notes follow.`;
+
+const PASSING_VERDICT = { faithful: true, answerable: true, difficultyMatch: true, reason: "ok" };
 
 describe("generateQuiz", () => {
   const originalFallback = process.env.OPENROUTER_MODEL_FALLBACK;
@@ -98,15 +89,14 @@ describe("generateQuiz", () => {
 
   beforeEach(() => {
     draftCounter = 0;
-    // Default: faithfulness check passes (or is skipped, same as an empty
-    // sourceText would do for real) so tests that aren't about grounding
-    // don't need to think about it.
-    scoreFaithfulnessMock.mockImplementation(async () => null);
+    // Default: the combined judge passes every axis, so tests that aren't
+    // about grading don't have to think about it.
+    judgeQuestionMock.mockImplementation(async () => ({ ...PASSING_VERDICT }));
   });
 
   afterEach(() => {
     completeChatMock.mockReset();
-    scoreFaithfulnessMock.mockReset();
+    judgeQuestionMock.mockReset();
     if (originalFallback === undefined) delete process.env.OPENROUTER_MODEL_FALLBACK;
     else process.env.OPENROUTER_MODEL_FALLBACK = originalFallback;
     if (originalBackend === undefined) delete process.env.LLM_BACKEND;
@@ -156,7 +146,8 @@ describe("generateQuiz", () => {
 
   it("falls back to the second model and still succeeds when the primary model never returns valid JSON", async () => {
     // Two distinct draft models only exist on the "openrouter" backend; the
-    // default "local" backend serves one model for every ladder rung.
+    // default "local" backend serves one model for every ladder rung (and so
+    // skips the fallback-model third attempt entirely).
     process.env.LLM_BACKEND = "openrouter";
     process.env.OPENROUTER_MODEL_FALLBACK = "fallback/model";
     completeChatMock.mockImplementation(async (model: string, messages: ChatMessage[]) => {
@@ -225,40 +216,34 @@ describe("generateQuiz", () => {
     expect(quiz.questions[0].choices).toContain(quiz.questions[0].answer);
   });
 
-  it("retries a schema-valid draft that fails the faithfulness check, and keeps it once faithfulness passes", async () => {
+  it("retries a schema-valid draft that fails the grounding check, and keeps it once it passes", async () => {
     completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
-    scoreFaithfulnessMock
-      .mockImplementationOnce(async () => 0.2) // first attempt: not grounded
-      .mockImplementation(async () => 0.95); // repair retry: grounded
+    judgeQuestionMock
+      .mockImplementationOnce(async () => ({ ...PASSING_VERDICT, faithful: false })) // first attempt: not grounded
+      .mockImplementation(async () => ({ ...PASSING_VERDICT })); // repair retry: grounded
 
     const { generateQuiz } = await import("@/lib/localQuizGenerator");
     const quiz = await generateQuiz({
       topics: ["Sanatana Dharma"],
-      // Contains every MULTIPLE_CHOICE_FACTS answer verbatim so these
-      // faithfulness-focused tests don't also trip the (unrelated)
-      // verbatim-correct-answer check on whichever slot type gets drawn.
-      sourceText: "Some course-note excerpt about Sukadeva Goswami, Vyasa, Sukadeva, Pariksit, and Shringi.",
+      sourceText: GROUNDED_SOURCE,
       questionCount: 1,
       difficulty: "mixed",
       coverageLabel: "Week 1",
     });
 
     expect(quiz.questions).toHaveLength(1);
-    expect(scoreFaithfulnessMock.mock.calls.length).toBeGreaterThan(1);
+    expect(judgeQuestionMock.mock.calls.length).toBeGreaterThan(1);
   });
 
-  it("drops a slot whose drafts never pass the faithfulness check", async () => {
+  it("drops a slot whose drafts never pass the grounding check", async () => {
     completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
-    scoreFaithfulnessMock.mockImplementation(async () => 0.1);
+    judgeQuestionMock.mockImplementation(async () => ({ ...PASSING_VERDICT, faithful: false }));
 
     const { generateQuiz, QuizGenerationError } = await import("@/lib/localQuizGenerator");
     await expect(
       generateQuiz({
         topics: ["Sanatana Dharma"],
-        // Contains every MULTIPLE_CHOICE_FACTS answer verbatim so these
-      // faithfulness-focused tests don't also trip the (unrelated)
-      // verbatim-correct-answer check on whichever slot type gets drawn.
-      sourceText: "Some course-note excerpt about Sukadeva Goswami, Vyasa, Sukadeva, Pariksit, and Shringi.",
+        sourceText: GROUNDED_SOURCE,
         questionCount: 1,
         difficulty: "mixed",
         coverageLabel: "Week 1",
@@ -266,12 +251,37 @@ describe("generateQuiz", () => {
     ).rejects.toThrow(QuizGenerationError);
   });
 
+  it("skips the grounding judge when the cited excerpt and the answer are both verbatim in the passage", async () => {
+    // source_excerpt AND the marked answer both appear verbatim => grounded
+    // by construction => no judge call at all on the local backend.
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // force multiple_choice
+    completeChatMock.mockImplementation(async () =>
+      JSON.stringify({
+        type: "multiple_choice",
+        question: "Who narrates the Bhagavatam to Pariksit?",
+        choices: ["Sukadeva Goswami", "Vyasa", "Narada", "Suta"],
+        answer: "Sukadeva Goswami",
+        explanation: "Because.",
+        core_fact: "narrator of the Bhagavatam to Pariksit",
+        source_excerpt: SOURCE_EXCERPT,
+      })
+    );
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: `${SOURCE_EXCERPT}. Sukadeva Goswami is the narrator.`,
+      questionCount: 1,
+      difficulty: "mixed",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+    expect(judgeQuestionMock).not.toHaveBeenCalled();
+    randomSpy.mockRestore();
+  });
+
   it("never keeps two questions that are exact repeats of each other", async () => {
-    // Every call returns the exact same multiple_choice content — with two
-    // slots running concurrently, both can pass their own duplicate check
-    // before either result is recorded (the scenario the final sweep pass
-    // exists to catch), and every regeneration attempt is just as
-    // duplicate, so the second slot should end up dropped rather than kept.
     completeChatMock.mockImplementation(async () =>
       JSON.stringify({
         type: "multiple_choice",
@@ -296,17 +306,9 @@ describe("generateQuiz", () => {
   });
 
   it("rejects a reworded question that reuses the same answer and mostly the same choices", async () => {
-    // Reproduces the reported bug: differently-worded questions that both
-    // resolve to the same answer with 3 of 4 choices in common (only their
-    // wording differs, e.g. "main subject Bhagavatam directs us towards"
-    // vs. "main subject (lakshana) of Canto 10") should be caught even
-    // though plain question-text similarity wouldn't flag them.
     let call = 0;
     completeChatMock.mockImplementation(async () => {
       call++;
-      // Deliberately different core_fact wording on each branch too, so this
-      // test still proves the pre-existing answer/choice-overlap check
-      // catches this case on its own, independent of the new core_fact check.
       return call % 2 === 1
         ? JSON.stringify({
             type: "multiple_choice",
@@ -339,13 +341,6 @@ describe("generateQuiz", () => {
   });
 
   it("rejects two questions with unrelated wording and answers that both test the same core_fact", async () => {
-    // Reproduces the live bug this was added for: a course whose material
-    // restates its central theme ("the point is to inspire devotion") in
-    // several passages can produce two questions with different question
-    // text, different explanations, and non-matching answers/choices that
-    // still both just test that same restated theme. Only the core_fact
-    // overlap check (not question-text, explanation, or answer/choice
-    // overlap — all deliberately kept low here) should catch this pair.
     let call = 0;
     completeChatMock.mockImplementation(async () => {
       call++;
@@ -391,16 +386,14 @@ describe("generateQuiz", () => {
   });
 
   it("rejects an ambiguous multiple_choice draft and recovers once the answerability check passes", async () => {
-    process.env.LLM_BACKEND = "openrouter"; // the answerability judge only runs on this backend
+    process.env.LLM_BACKEND = "openrouter"; // the answerability axis only gates on this backend
     const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // forces multiple_choice every time
-    let answerabilityCalls = 0;
-    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
-      if (isAnswerabilityCheck(messages)) {
-        answerabilityCalls++;
-        return JSON.stringify({ answerable: answerabilityCalls > 1, reason: "test" });
-      }
-      return validDraftFor(messages);
+    let judgeCalls = 0;
+    judgeQuestionMock.mockImplementation(async () => {
+      judgeCalls++;
+      return { ...PASSING_VERDICT, answerable: judgeCalls > 1 };
     });
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
 
     const { generateQuiz } = await import("@/lib/localQuizGenerator");
     const quiz = await generateQuiz({
@@ -413,27 +406,21 @@ describe("generateQuiz", () => {
 
     expect(quiz.questions).toHaveLength(1);
     expect(quiz.questions[0].type).toBe("multiple_choice");
-    expect(answerabilityCalls).toBeGreaterThan(1);
+    expect(judgeCalls).toBeGreaterThan(1);
     randomSpy.mockRestore();
   });
 
   it("drops a slot whose answerability check never passes, even after its type flips to escape a stuck quota", async () => {
-    process.env.LLM_BACKEND = "openrouter"; // the answerability judge only runs on this backend
-    // questionCount: 1 is always assigned multiple_choice up front (see
-    // assignQuestionTypes), but a slot stuck failing for a couple of rounds
-    // gets its type flipped once as a last resort (see TYPE_FLIP_AFTER_ROUNDS
-    // in generateQuiz) so the requested question *count* doesn't get
-    // sacrificed to a type quota the material can't fill. This forces the
-    // flipped-to true_false attempt to fail too (invalid JSON), so the test
-    // still proves a genuinely unfillable slot gets dropped rather than the
-    // flip being an unconditional escape hatch.
+    process.env.LLM_BACKEND = "openrouter";
+    judgeQuestionMock.mockImplementation(async (p: { type: string }) => ({
+      ...PASSING_VERDICT,
+      answerable: p.type === "multiple_choice" ? false : true,
+    }));
+    // Force the flipped-to true_false attempt to fail too (invalid JSON), so
+    // the test still proves a genuinely unfillable slot is dropped rather
+    // than the type flip being an unconditional escape hatch.
     completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
-      if (isAnswerabilityCheck(messages)) {
-        return JSON.stringify({ answerable: false, reason: "always ambiguous" });
-      }
-      if (requestedType(messages) === "true_false") {
-        return "not valid json";
-      }
+      if (requestedType(messages) === "true_false") return "not valid json";
       return validDraftFor(messages);
     });
 
@@ -450,18 +437,12 @@ describe("generateQuiz", () => {
   });
 
   it("flips a stuck slot's type after enough failed rounds so the requested question count is still met", async () => {
-    process.env.LLM_BACKEND = "openrouter"; // relies on the answerability judge, which only runs on this backend
-    // Simulates a slot whose assigned type (multiple_choice, per
-    // assignQuestionTypes for questionCount: 1) can never pass — here because
-    // the answerability judge always rejects it — while the *other* type
-    // succeeds immediately. Without the type-flip fallback this slot would
-    // be dropped and the quiz would come back short of the requested count.
-    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
-      if (isAnswerabilityCheck(messages)) {
-        return JSON.stringify({ answerable: false, reason: "always ambiguous" });
-      }
-      return validDraftFor(messages);
-    });
+    process.env.LLM_BACKEND = "openrouter";
+    judgeQuestionMock.mockImplementation(async (p: { type: string }) => ({
+      ...PASSING_VERDICT,
+      answerable: p.type === "multiple_choice" ? false : true,
+    }));
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
 
     const { generateQuiz } = await import("@/lib/localQuizGenerator");
     const quiz = await generateQuiz({
@@ -477,16 +458,6 @@ describe("generateQuiz", () => {
   });
 
   it("drops a slot whose every draft duplicates an existingQuestions entry passed in by the caller", async () => {
-    // existingQuestions represents prior quizzes' history (Phase 5:
-    // generation dedup) — findDuplicate checks the merged in-batch +
-    // existingQuestions list, so a draft that only duplicates something
-    // from existingQuestions (never generated in this run) should still be
-    // caught on every attempt and the slot dropped.
-    // questionCount: 1 is always assigned multiple_choice (see
-    // assignQuestionTypes — a 1-question quiz rounds its true_false quota
-    // down to 0), so the mocked draft and existingQuestions entry below are
-    // both multiple_choice to actually exercise the duplicate path rather
-    // than accidentally failing on a type mismatch instead.
     completeChatMock.mockImplementation(async () =>
       JSON.stringify({
         type: "multiple_choice",
@@ -527,10 +498,6 @@ describe("generateQuiz", () => {
     completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
 
     const { generateQuiz } = await import("@/lib/localQuizGenerator");
-    // questionCount: 5 so the 4 multiple_choice + 1 true_false slots it needs
-    // stay within MULTIPLE_CHOICE_FACTS/TRUE_FALSE_FACTS' 5 distinct facts
-    // each — a larger count would need to cycle back through the same facts
-    // and start tripping findDuplicate, which isn't what this test is about.
     const quiz = await generateQuiz({
       topics: ["Sanatana Dharma"],
       sourceText: "",
@@ -541,21 +508,17 @@ describe("generateQuiz", () => {
 
     expect(quiz.questions).toHaveLength(5);
     const trueFalseCount = quiz.questions.filter((q) => q.type === "true_false").length;
-    // TRUE_FALSE_RATIO is 0.2 — for 5 questions that's an exact quota of 1,
-    // not a probabilistic average, so this should hold on every run.
     expect(trueFalseCount).toBe(1);
   });
 
   it("rejects a draft that fails the difficulty-conformance judge and recovers once it matches", async () => {
-    process.env.LLM_BACKEND = "openrouter"; // the difficulty-conformance judge only runs on this backend
-    let difficultyCalls = 0;
-    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
-      if (isDifficultyCheck(messages)) {
-        difficultyCalls++;
-        return JSON.stringify({ matches: difficultyCalls > 1, reason: "test" });
-      }
-      return validDraftFor(messages);
+    process.env.LLM_BACKEND = "openrouter"; // the difficulty axis only gates on this backend
+    let judgeCalls = 0;
+    judgeQuestionMock.mockImplementation(async () => {
+      judgeCalls++;
+      return { ...PASSING_VERDICT, difficultyMatch: judgeCalls > 1 };
     });
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
 
     const { generateQuiz } = await import("@/lib/localQuizGenerator");
     const quiz = await generateQuiz({
@@ -567,17 +530,13 @@ describe("generateQuiz", () => {
     });
 
     expect(quiz.questions).toHaveLength(1);
-    expect(difficultyCalls).toBeGreaterThan(1);
+    expect(judgeCalls).toBeGreaterThan(1);
   });
 
   it("drops a slot whose difficulty-conformance check never passes", async () => {
-    process.env.LLM_BACKEND = "openrouter"; // the difficulty-conformance judge only runs on this backend
-    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
-      if (isDifficultyCheck(messages)) {
-        return JSON.stringify({ matches: false, reason: "never matches" });
-      }
-      return validDraftFor(messages);
-    });
+    process.env.LLM_BACKEND = "openrouter";
+    judgeQuestionMock.mockImplementation(async () => ({ ...PASSING_VERDICT, difficultyMatch: false }));
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
 
     const { generateQuiz, QuizGenerationError } = await import("@/lib/localQuizGenerator");
     await expect(
@@ -591,31 +550,69 @@ describe("generateQuiz", () => {
     ).rejects.toThrow(QuizGenerationError);
   });
 
-  it("on the local backend never calls the difficulty or answerability judges, even for a draft they would reject", async () => {
-    // No LLM_BACKEND set → "local". Both judges are mocked to always fail;
-    // if either were consulted the slot would be rejected and the quiz would
-    // come back short. Instead it should keep the draft as-is.
+  it("on the local backend asks the judge for grounding only — never difficulty or answerability", async () => {
+    // Grounded, so judgeQuestion IS called (for faithfulness). It's mocked
+    // to fail difficulty and answerability; if the local backend gated on
+    // those the slot would be dropped. Instead the draft is kept and the
+    // call is made with those axes explicitly not requested.
     const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // force multiple_choice
-    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
-      if (isAnswerabilityCheck(messages)) return JSON.stringify({ answerable: false, reason: "would reject" });
-      if (isDifficultyCheck(messages)) return JSON.stringify({ matches: false, reason: "would reject" });
-      return validDraftFor(messages);
-    });
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => validDraftFor(messages));
+    judgeQuestionMock.mockImplementation(async () => ({ faithful: true, answerable: false, difficultyMatch: false, reason: "x" }));
 
     const { generateQuiz } = await import("@/lib/localQuizGenerator");
     const quiz = await generateQuiz({
       topics: ["Sanatana Dharma"],
-      sourceText: "",
+      sourceText: GROUNDED_SOURCE,
       questionCount: 1,
       difficulty: "advanced",
       coverageLabel: "Week 1",
     });
 
     expect(quiz.questions).toHaveLength(1);
-    const judgeCalls = completeChatMock.mock.calls.filter(
-      ([, messages]) => isAnswerabilityCheck(messages) || isDifficultyCheck(messages)
-    );
-    expect(judgeCalls).toHaveLength(0);
+    expect(judgeQuestionMock).toHaveBeenCalled();
+    for (const [callArg] of judgeQuestionMock.mock.calls as [Record<string, unknown>][]) {
+      expect(callArg.askAnswerable).toBe(false);
+      expect(callArg.difficultyCriteria).toBeNull();
+      expect(callArg.askFaithful).toBe(true);
+    }
     randomSpy.mockRestore();
+  });
+
+  it("grounds each slot and the judge in its focus topic's scoped passage, not the whole corpus", async () => {
+    process.env.LLM_BACKEND = "openrouter"; // so the judge runs for grounding on every slot
+    const draftUserMessages: string[] = [];
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      draftUserMessages.push(messages.find((m) => m.role === "user")?.content ?? "");
+      return validDraftFor(messages);
+    });
+    const judgeSourceTexts: string[] = [];
+    judgeQuestionMock.mockImplementation(async (p: { sourceText: string }) => {
+      judgeSourceTexts.push(p.sourceText);
+      return { ...PASSING_VERDICT };
+    });
+
+    const alphaPassage = `ALPHA_PASSAGE. ${SOURCE_EXCERPT}. ${"alpha detail ".repeat(300)}`;
+    const betaPassage = `BETA_PASSAGE. ${SOURCE_EXCERPT}. ${"beta detail ".repeat(300)}`;
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    await generateQuiz({
+      topics: ["Alpha", "Beta"],
+      sourceText: "FULL_CORPUS_SENTINEL — this must never be shown to a call",
+      topicSourceText: { Alpha: alphaPassage, Beta: betaPassage },
+      questionCount: 4,
+      difficulty: "mixed",
+      coverageLabel: "Week X",
+    });
+
+    expect(draftUserMessages.length).toBeGreaterThan(0);
+    for (const content of draftUserMessages) {
+      expect(content).not.toContain("FULL_CORPUS_SENTINEL");
+      expect(content.includes("ALPHA_PASSAGE") || content.includes("BETA_PASSAGE")).toBe(true);
+    }
+    expect(judgeSourceTexts.length).toBeGreaterThan(0);
+    for (const sourceText of judgeSourceTexts) {
+      expect(sourceText).not.toContain("FULL_CORPUS_SENTINEL");
+      expect(sourceText.includes("ALPHA_PASSAGE") || sourceText.includes("BETA_PASSAGE")).toBe(true);
+    }
   });
 });

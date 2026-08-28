@@ -10,6 +10,7 @@
  */
 
 import { llmClientConfig } from "@/lib/llmBackend";
+import { estimateTokens, recordLlmCall, type LlmCallType } from "@/lib/llmTelemetry";
 
 export type ChatMessage = { role: "system" | "user"; content: string };
 
@@ -25,13 +26,22 @@ export class OpenRouterError extends Error {
  * assistant message's raw text content. Requests JSON-object output —
  * callers are still responsible for validating the shape of what comes
  * back, since "valid JSON" and "matches our schema" are different things.
+ *
+ * `callType` is observability only (see llmTelemetry.ts): it tags the
+ * per-call token/latency record so a per-quiz summary can break spend down
+ * by draft vs. repair vs. judge. It never changes the request.
  */
-export async function completeChat(model: string, messages: ChatMessage[]): Promise<string> {
+export async function completeChat(
+  model: string,
+  messages: ChatMessage[],
+  callType: LlmCallType = "unknown"
+): Promise<string> {
   const { backend, baseURL, apiKey, apiKeyEnvHint, timeoutMs, extraHeaders } = llmClientConfig();
   if (!apiKey) throw new OpenRouterError(`${apiKeyEnvHint} is not set.`);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
 
   let response: Response;
   try {
@@ -65,8 +75,22 @@ export async function completeChat(model: string, messages: ChatMessage[]): Prom
     throw new OpenRouterError(`LLM endpoint returned HTTP ${response.status} for ${model}: ${body.slice(0, 300)}`);
   }
 
-  const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+  const data = (await response.json()) as {
+    choices?: { message?: { content?: string } }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new OpenRouterError(`LLM endpoint returned no content for ${model}.`);
+
+  const serverPrompt = data.usage?.prompt_tokens;
+  const serverCompletion = data.usage?.completion_tokens;
+  const hasServerUsage = typeof serverPrompt === "number" && typeof serverCompletion === "number";
+  recordLlmCall({
+    callType,
+    promptTokens: hasServerUsage ? serverPrompt : estimateTokens(messages.map((m) => m.content).join("\n")),
+    completionTokens: hasServerUsage ? serverCompletion : estimateTokens(content),
+    latencyMs: Date.now() - startedAt,
+    estimated: !hasServerUsage,
+  });
   return content;
 }

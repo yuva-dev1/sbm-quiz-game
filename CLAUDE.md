@@ -96,14 +96,17 @@ model and no fallback anywhere else; `openrouter` restores the hosted `gpt-4o-mi
 path. Grounding is course-note text
 (`src/data/courseNotes.json`, regenerated from `content/course-notes/` via
 `node scripts/build_course_notes.mjs`), scoped by `src/data/courseCatalog.json` (regenerated via
-`python scripts/build_course_catalog.py`). When a host picks specific topics rather than "all
-topics", grounding is narrowed further to just those topics' hand-authored excerpts
-(`src/data/courseTopicText.json`, see `docs/topic-scoped-grounding.md`) instead of the whole week's
-notes — the single biggest lever on generation latency, since the source text rides along in every
-draft and judge call. Every candidate question is scored against the source
-notes with autoevals' Faithfulness metric (`src/lib/faithfulness.ts`) before acceptance. The same
-generator is also exposed standalone at `POST /generate-quiz` for other services, gated by a bearer
-token (`GENERATE_QUIZ_API_KEY`), independent of this app's own DB-backed `/api/quizzes/*` flow.
+`python scripts/build_course_catalog.py`). Grounding is narrowed **per slot**: each question is
+shown only its assigned topic's hand-authored excerpt (`src/data/courseTopicText.json`, via
+`getTopicSourceText`, see `docs/topic-scoped-grounding.md`) rather than the whole week's notes —
+the single biggest lever on generation latency, since the source text rides along in every draft
+and judge call. Every candidate is checked by one combined LLM-judge call
+(`src/lib/faithfulness.ts`'s `judgeQuestion` — grounding + single-defensible-answer + difficulty
+tier) against that same per-slot text before acceptance; `local` gates on grounding only. Per-run
+telemetry (`src/lib/llmTelemetry.ts`) logs a wall-time / call-count / prompt-token summary;
+`scripts/bench_generation.ts` is the fixed-selection latency check. The same generator is also
+exposed standalone at `POST /generate-quiz` for other services, gated by a bearer token
+(`GENERATE_QUIZ_API_KEY`), independent of this app's own DB-backed `/api/quizzes/*` flow.
 
 **Auth**: `/host` and `/api/quizzes/*` sit behind a shared passcode (`HOST_PASSCODE`,
 `src/lib/hostAuth.ts`), session cookie signed with `SESSION_SECRET`. There's no per-user auth model —

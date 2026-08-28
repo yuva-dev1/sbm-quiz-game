@@ -23,12 +23,12 @@
  * OpenRouter request is ever made is LLM_BACKEND=openrouter.
  *
  * Grading in "local" mode: with a single model on the box, the drafter also
- * grades its own output (primary == fallback == every judge). Self-grading
- * runs more lenient than an independent judge would; this is an accepted
+ * grades its own output (primary == fallback == judge). Self-grading runs
+ * more lenient than an independent judge would; this is an accepted
  * limitation of running fully local with one 4B model — there is no second
- * model on the endpoint. See scoreFaithfulness in faithfulness.ts for the
- * related note that autoevals' Faithfulness may not parse cleanly against a
- * 4B model and fails open (the check is then skipped).
+ * model on the endpoint. See judgeQuestion in faithfulness.ts: on "local"
+ * it gates on grounding only and fails open (verdict null → keep the draft)
+ * if the small model can't return a clean JSON verdict.
  */
 
 export type LlmBackend = "local" | "openrouter";
@@ -45,12 +45,18 @@ export function llmBackend(): LlmBackend {
 // key surfaces as a clear "LLM_API_KEY is not set" error at call time.
 const DEFAULT_LLM_BASE_URL = "https://llm-box.tailc146aa.ts.net/v1";
 const DEFAULT_LLM_MODEL = "qwen3-4b-local";
-// Local 4B model on one GPU: ~3-10s per question warm, but cold starts and
-// the longer repair prompts push well past OpenRouter's 30s.
-const DEFAULT_LLM_TIMEOUT_MS = 180_000;
-// A single GPU serves ~3 requests in parallel before latency balloons.
-const DEFAULT_LLM_CONCURRENCY = 3;
-const DEFAULT_LLM_TOPUP_CONCURRENCY = 3;
+// Once generation and judge calls carry only a per-slot scoped passage
+// (~1-4k tokens) instead of the whole week's notes (~27k), a warm call
+// lands in a few seconds and a cold start / repair no longer needs minutes
+// of headroom. Overridable via LLM_TIMEOUT_MS.
+const DEFAULT_LLM_TIMEOUT_MS = 60_000;
+// With small per-slot prompts one stream no longer saturates the GPU, so the
+// box can serve more in parallel. This assumes the self-hosted endpoint runs
+// OLLAMA_NUM_PARALLEL >= 6 (see docs/self-hosted-llm.md); if it doesn't, the
+// extra calls just queue there — set LLM_CONCURRENCY / LLM_TOPUP_CONCURRENCY
+// back down to match.
+const DEFAULT_LLM_CONCURRENCY = 6;
+const DEFAULT_LLM_TOPUP_CONCURRENCY = 6;
 
 // --- OpenRouter defaults (unchanged production behaviour) -----------------
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -78,7 +84,7 @@ export type LlmClientConfig = {
 };
 
 /** Base URL / key / timeout / headers for the raw chat-completions client
- *  (openrouter.ts) and the autoevals judge client (faithfulness.ts). */
+ *  (openrouter.ts), also used by the combined judge in faithfulness.ts. */
 export function llmClientConfig(): LlmClientConfig {
   if (llmBackend() === "openrouter") {
     return {
@@ -118,9 +124,9 @@ export function generationModels(): { primaryModel: string; fallbackModel: strin
   return { primaryModel: model, fallbackModel: model };
 }
 
-/** Parallel model calls per generation. OpenRouter absorbs 32/16 fine; a
- *  single self-hosted GPU wants LLM_CONCURRENCY / LLM_TOPUP_CONCURRENCY
- *  (default 3/3). */
+/** Parallel model calls per generation. OpenRouter absorbs 32/16 fine; the
+ *  self-hosted GPU uses LLM_CONCURRENCY / LLM_TOPUP_CONCURRENCY (default 6/6,
+ *  assumes OLLAMA_NUM_PARALLEL >= 6 on the box). */
 export function generationConcurrency(): { concurrency: number; topupConcurrency: number } {
   if (llmBackend() === "openrouter") {
     return { concurrency: OPENROUTER_CONCURRENCY, topupConcurrency: OPENROUTER_TOPUP_CONCURRENCY };

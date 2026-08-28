@@ -3,17 +3,22 @@
  * course-note text it was supposed to be grounded in, using autoevals'
  * (https://github.com/braintrustdata/autoevals) RAGAS-style Faithfulness
  * metric — an LLM-as-judge check for whether the claim's assertions appear
- * in the source, not just whether they sound plausible.
+ * in the source, not just whether they sound plausible. It extracts factual
+ * statements from `output` (interpreted as the answer to `input`) and checks
+ * each against `context` for entailment — so all three fields are required
+ * (autoevals throws "Faithfulness requires input value" if `input` is
+ * omitted).
  *
  * The judge runs on whatever LLM_BACKEND selects (see llmBackend.ts): the
  * self-hosted endpoint (default) or OpenRouter. In the default "local" mode
  * the judge model IS the drafter model (one 4B model on the box) — a model
  * grading its own output is more lenient than an independent judge, and
- * autoevals' Faithfulness prompt doesn't always parse cleanly against a
- * model that small. When the judge call fails or returns no numeric score,
- * scoreFaithfulness fails open (returns null → the caller skips the check)
- * and logs it, so a validator outage never silently drops an otherwise-good
- * question and the skipped-check rate stays visible in Cloud Run logs.
+ * autoevals' Faithfulness runs two tool-calling round-trips that a model
+ * that small doesn't always complete cleanly. When the judge call fails or
+ * returns no numeric score, scoreFaithfulness fails open (returns null → the
+ * caller skips the grounding check for that question) and logs it, so a
+ * validator outage never silently drops an otherwise-good question and the
+ * skipped-check rate stays visible in Cloud Run logs.
  */
 
 import OpenAI from "openai";
@@ -35,13 +40,22 @@ function getClient(): OpenAI {
  * (no source text for this scope) or the judge call itself failed — a
  * validator outage shouldn't silently drop an otherwise-valid question, so
  * callers should treat null as "skip this check" rather than "failed it."
+ *
+ * `question` is the quiz question; `answerClaim` is the assertion(s) to
+ * ground — the answer plus its explanation.
  */
-export async function scoreFaithfulness(claim: string, sourceText: string, judgeModel: string): Promise<number | null> {
+export async function scoreFaithfulness(
+  question: string,
+  answerClaim: string,
+  sourceText: string,
+  judgeModel: string
+): Promise<number | null> {
   if (!sourceText.trim()) return null;
 
   try {
     const result = await Faithfulness({
-      output: claim,
+      input: question,
+      output: answerClaim,
       context: sourceText,
       model: judgeModel,
       client: getClient(),

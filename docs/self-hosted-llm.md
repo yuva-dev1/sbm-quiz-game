@@ -1,13 +1,13 @@
 # LLM backend for quiz generation
 
-Quiz generation (`src/lib/localQuizGenerator.ts`) and its three LLM judges
+Quiz generation (`src/lib/localQuizGenerator.ts`) and its LLM judges
 (faithfulness, answerable, difficulty-match) talk to one of two backends,
 chosen by a single env var: **`LLM_BACKEND`**.
 
 | `LLM_BACKEND` | What runs | Keyed by |
 |---|---|---|
-| unset / `local` | **the default.** 100% self-hosted: primary draft, repair retry, fallback-slot draft, and all three judges hit the self-hosted OpenAI-compatible endpoint using one model (`qwen3-4b-local`). | `LLM_API_KEY` |
-| `openrouter` | The prior production path, unchanged: `openai/gpt-4o-mini` primary, `google/gemini-2.5-flash` fallback slot, judges on OpenRouter. | `OPENROUTER_API_KEY` |
+| unset / `local` | **the default.** 100% self-hosted: primary draft, repair retry, fallback-slot draft, and the faithfulness judge hit the self-hosted OpenAI-compatible endpoint using one model (`qwen3-4b-local`). The answerable and difficulty-match judges are **skipped** in this mode (see below). | `LLM_API_KEY` |
+| `openrouter` | The prior production path, unchanged: `openai/gpt-4o-mini` primary, `google/gemini-2.5-flash` fallback slot, all three judges on OpenRouter. | `OPENROUTER_API_KEY` |
 
 Resolution lives in `src/lib/llmBackend.ts`; `openrouter.ts` and
 `faithfulness.ts` read it for their client config, `localQuizGenerator.ts`
@@ -23,22 +23,31 @@ still can't be filled stays empty and flows into the existing top-up /
 relaxation path, exactly as before. The **only** way an OpenRouter request
 is ever made is `LLM_BACKEND=openrouter`.
 
-## `local` mode: one model grades its own output
+## `local` mode: judges
 
 The self-hosted box serves a single 4B model, so in `local` mode the drafter
-is also every judge (`primary == fallback == faithfulness/answerable/
-difficulty judge`). A model scoring its own generations is more lenient than
-an independent judge would be. This is an accepted limitation of running
-fully local with one model — there is no second model on the endpoint. It's
-logged once per process (`[localQuizGenerator] LLM_BACKEND=local: …`).
+is also the judge. Two of the three judges are handled specially:
 
-Separately, autoevals' `Faithfulness` prompt doesn't always parse cleanly
-against a model this small. When the judge call fails or returns no numeric
-score, `scoreFaithfulness` **fails open** (returns `null` → the caller skips
-the grounding check for that question) and logs it
-(`[faithfulness] judge "…" … failing open, grounding check skipped`). Watch
-the rate of that line in Cloud Run logs — a high rate means grounding is
-effectively unenforced.
+- **`checkAnswerable` and `checkDifficultyMatch` are skipped entirely.**
+  They're yes/no self-reviews — the same 4B model grading its own draft,
+  which is weak signal, and a flaky self-"fail" only buys a wasted repair
+  round trip. Dropping them roughly halves the model calls per slot. They
+  still run on the `openrouter` backend, where the judge is a different
+  model from the drafter.
+- **`scoreFaithfulness` still runs.** It's a distinct RAGAS metric (extract
+  statements from the answer, NLI-check each against the source), not a
+  yes/no self-review, so it retains value even self-graded. But autoevals'
+  `Faithfulness` runs two forced tool-calling round-trips that a 4B model
+  under generation load doesn't always complete. When the call fails or
+  returns no numeric score, `scoreFaithfulness` **fails open** (returns
+  `null` → the caller skips the grounding check for that question) and logs
+  it (`[faithfulness] judge "…" … failing open, grounding check skipped`).
+  Watch the rate of that line in Cloud Run logs — when it's high, grounding
+  on the local backend rests on the verbatim `source_excerpt` citation
+  check (which is mechanical and always enforced), not the score.
+
+The `local` backend logs its judge setup once per process
+(`[localQuizGenerator] LLM_BACKEND=local: …`).
 
 ## Env vars
 

@@ -10,7 +10,7 @@ vi.mock("@/lib/openrouter", () => ({
 }));
 
 vi.mock("@/lib/faithfulness", () => ({
-  scoreFaithfulness: (...args: [string, string, string]) => scoreFaithfulnessMock(...args),
+  scoreFaithfulness: (...args: [string, string, string, string]) => scoreFaithfulnessMock(...args),
 }));
 
 function requestedType(messages: ChatMessage[]): "multiple_choice" | "true_false" {
@@ -391,6 +391,7 @@ describe("generateQuiz", () => {
   });
 
   it("rejects an ambiguous multiple_choice draft and recovers once the answerability check passes", async () => {
+    process.env.LLM_BACKEND = "openrouter"; // the answerability judge only runs on this backend
     const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // forces multiple_choice every time
     let answerabilityCalls = 0;
     completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
@@ -417,6 +418,7 @@ describe("generateQuiz", () => {
   });
 
   it("drops a slot whose answerability check never passes, even after its type flips to escape a stuck quota", async () => {
+    process.env.LLM_BACKEND = "openrouter"; // the answerability judge only runs on this backend
     // questionCount: 1 is always assigned multiple_choice up front (see
     // assignQuestionTypes), but a slot stuck failing for a couple of rounds
     // gets its type flipped once as a last resort (see TYPE_FLIP_AFTER_ROUNDS
@@ -448,6 +450,7 @@ describe("generateQuiz", () => {
   });
 
   it("flips a stuck slot's type after enough failed rounds so the requested question count is still met", async () => {
+    process.env.LLM_BACKEND = "openrouter"; // relies on the answerability judge, which only runs on this backend
     // Simulates a slot whose assigned type (multiple_choice, per
     // assignQuestionTypes for questionCount: 1) can never pass — here because
     // the answerability judge always rejects it — while the *other* type
@@ -544,6 +547,7 @@ describe("generateQuiz", () => {
   });
 
   it("rejects a draft that fails the difficulty-conformance judge and recovers once it matches", async () => {
+    process.env.LLM_BACKEND = "openrouter"; // the difficulty-conformance judge only runs on this backend
     let difficultyCalls = 0;
     completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
       if (isDifficultyCheck(messages)) {
@@ -567,6 +571,7 @@ describe("generateQuiz", () => {
   });
 
   it("drops a slot whose difficulty-conformance check never passes", async () => {
+    process.env.LLM_BACKEND = "openrouter"; // the difficulty-conformance judge only runs on this backend
     completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
       if (isDifficultyCheck(messages)) {
         return JSON.stringify({ matches: false, reason: "never matches" });
@@ -584,5 +589,33 @@ describe("generateQuiz", () => {
         coverageLabel: "Week 1",
       })
     ).rejects.toThrow(QuizGenerationError);
+  });
+
+  it("on the local backend never calls the difficulty or answerability judges, even for a draft they would reject", async () => {
+    // No LLM_BACKEND set → "local". Both judges are mocked to always fail;
+    // if either were consulted the slot would be rejected and the quiz would
+    // come back short. Instead it should keep the draft as-is.
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // force multiple_choice
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      if (isAnswerabilityCheck(messages)) return JSON.stringify({ answerable: false, reason: "would reject" });
+      if (isDifficultyCheck(messages)) return JSON.stringify({ matches: false, reason: "would reject" });
+      return validDraftFor(messages);
+    });
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 1,
+      difficulty: "advanced",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+    const judgeCalls = completeChatMock.mock.calls.filter(
+      ([, messages]) => isAnswerabilityCheck(messages) || isDifficultyCheck(messages)
+    );
+    expect(judgeCalls).toHaveLength(0);
+    randomSpy.mockRestore();
   });
 });

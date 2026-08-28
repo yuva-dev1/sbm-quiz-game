@@ -227,8 +227,17 @@ function sha256Hex(str) {
   return bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
 }
 
-function sendResetEmail(email, regNo, token) {
+/** Public base URL of the self-study app. A reset email is useless without it
+ *  (the link would be host-relative), so a missing value is a hard error rather
+ *  than a silently-broken link. */
+function requireAppUrl_() {
   const appUrl = String(PropertiesService.getScriptProperties().getProperty('APP_URL') || '').replace(/\/+$/, '');
+  if (!appUrl) throw new Error('APP_URL script property is not set.');
+  return appUrl;
+}
+
+function sendResetEmail(email, regNo, token) {
+  const appUrl = requireAppUrl_();
   const link = appUrl + '/?token=' + encodeURIComponent(token) + '&reg=' + encodeURIComponent(regNo);
 
   const plainBody =

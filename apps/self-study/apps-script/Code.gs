@@ -227,8 +227,17 @@ function sha256Hex(str) {
   return bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
 }
 
-function sendResetEmail(email, regNo, token) {
+/** Public base URL of the self-study app. A reset email is useless without it
+ *  (the link would be host-relative), so a missing value is a hard error rather
+ *  than a silently-broken link. */
+function requireAppUrl_() {
   const appUrl = String(PropertiesService.getScriptProperties().getProperty('APP_URL') || '').replace(/\/+$/, '');
+  if (!appUrl) throw new Error('APP_URL script property is not set.');
+  return appUrl;
+}
+
+function sendResetEmail(email, regNo, token) {
+  const appUrl = requireAppUrl_();
   const link = appUrl + '/?token=' + encodeURIComponent(token) + '&reg=' + encodeURIComponent(regNo);
 
   const plainBody =
@@ -238,15 +247,19 @@ function sendResetEmail(email, regNo, token) {
     'Open this link to choose a new password (valid for 1 hour):\n' + link + '\n\n' +
     'If you did not request this, you can safely ignore this email - your password will not change.';
 
+  // Escape the URL for HTML contexts: its "&reg=" separator is otherwise parsed
+  // as the ® named character reference by mail clients, corrupting the link.
+  const linkHtml = escapeHtml_(link);
+
   const bodyHtml =
     '<p style="margin:0 0 14px;">Radhe Radhe,</p>' +
     '<p style="margin:0 0 24px;">We received a request to reset the password for registration number ' +
       '<strong style="color:' + BRAND_INK + ';">' + escapeHtml_(regNo) + '</strong>.</p>' +
-    ctaButton_(link, 'Choose a new password') +
+    ctaButton_(linkHtml, 'Choose a new password') +
     '<p style="margin:0 0 6px;font-size:12px;color:#8a8f98;text-align:center;">' +
       'This link is valid for one hour. If the button doesn\'t work, paste this link into your browser:</p>' +
     '<p style="margin:0 0 6px;font-size:12px;text-align:center;word-break:break-all;">' +
-      '<span style="color:' + BRAND_INDIGO + ';">' + link + '</span></p>' +
+      '<span style="color:' + BRAND_INDIGO + ';">' + linkHtml + '</span></p>' +
     '<div style="margin:24px 0 0;padding:14px 16px;background:#fffdf2;border-left:4px solid ' + BRAND_GOLD + ';' +
       'font-size:13px;color:#5b4a1e;">' +
       'If you did not request this, you can safely ignore this email &mdash; your password will not change.</div>';
@@ -305,6 +318,7 @@ function sendBrandedEmail_(to, subject, title, bodyHtml, plainBody) {
   MailApp.sendEmail(options);
 }
 
+/** `href` must already be HTML-attribute-safe (see sendResetEmail's linkHtml). */
 function ctaButton_(href, label) {
   return '<div style="text-align:center;margin:26px 0;">' +
     '<a href="' + href + '" style="display:inline-block;background:' + BRAND_INDIGO + ';color:#ffffff;' +

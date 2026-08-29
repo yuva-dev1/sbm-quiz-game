@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { getCourseCatalog, getSourceText, resolveGenerationScope, toPublicCourseWeeks, type CourseWeek } from "@/lib/courseCatalog";
+import {
+  getCourseCatalog,
+  getSourceText,
+  getTopicSourceText,
+  resolveGenerationScope,
+  toPublicCourseWeeks,
+  type CourseWeek,
+} from "@/lib/courseCatalog";
 import courseTopicText from "@/data/courseTopicText.json";
 
 function week(overrides: Partial<CourseWeek> = {}): CourseWeek {
@@ -118,6 +125,42 @@ describe("getSourceText", () => {
     const weeks = await getCourseCatalog();
     const scoped = getSourceText(weeks, ["week-1"], ["not a real topic in this week"]);
     expect(scoped).toBe(getSourceText(weeks, ["week-1"]));
+  });
+});
+
+describe("getTopicSourceText", () => {
+  it("returns a scoped passage for every topic of the selected weeks", async () => {
+    const weeks = await getCourseCatalog();
+    const weekOne = weeks.find((w) => w.id === "week-1")!;
+    const map = getTopicSourceText(weeks, ["week-1"]);
+    for (const topic of weekOne.topics) {
+      expect(map[topic]?.length, `no scoped passage for "${topic}"`).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps passages per-topic even when every topic of a week is selected (unlike getSourceText)", async () => {
+    const weeks = await getCourseCatalog();
+    const weekOne = weeks.find((w) => w.id === "week-1")!;
+    const fullWeek = getSourceText(weeks, ["week-1"]);
+    const map = getTopicSourceText(weeks, ["week-1"], weekOne.topics);
+
+    // getSourceText collapses "every topic selected" back to the full week;
+    // getTopicSourceText deliberately does not — each slot only ever sees
+    // its own topic's passage.
+    for (const topic of weekOne.topics) {
+      expect(map[topic]).toBeTruthy();
+      expect(map[topic].length).toBeLessThan(fullWeek.length);
+    }
+  });
+
+  it("narrows to the requested topics when a filter is given", async () => {
+    const weeks = await getCourseCatalog();
+    const map = getTopicSourceText(weeks, ["week-1"], ["Origin of the Term Hinduism"]);
+    expect(Object.keys(map)).toEqual(["Origin of the Term Hinduism"]);
+  });
+
+  it("returns an empty map when the selected weeks have neither a topic index nor bundled notes", () => {
+    expect(getTopicSourceText([week()], ["week-1"])).toEqual({});
   });
 });
 

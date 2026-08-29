@@ -202,3 +202,46 @@ export function getSourceText(weeks: CourseWeek[], weekIds: string[], topics?: s
   }
   return sections.join("\n\n");
 }
+
+/**
+ * Per-slot grounding map for topic-scoped generation: `{ <exact catalog
+ * topic>: <text a slot focused on that topic should be grounded in> }`, for
+ * every topic in the selected weeks (optionally narrowed to `topics`).
+ *
+ * Unlike getSourceText this deliberately does NOT collapse to full-week text
+ * when every topic of a week is selected — the whole point is that each
+ * generation and judge call sees only its one slot's passage, so a 15-slot
+ * "all topics" quiz stops re-uploading the whole week (or, across weeks, the
+ * whole course corpus) into 100+ calls. That was the dominant cost of a
+ * self-hosted generation: decode speed collapses when every token has to
+ * attend over ~27k tokens of inlined notes.
+ *
+ * A topic with no hand-authored excerpt — or a whole week with no index
+ * block — maps to that week's full notes, so its slots stay scoped to a
+ * single week rather than the entire multi-week selection. localQuizGenerator
+ * falls back further (to the run-wide sourceText) only when this map has no
+ * entry at all for a slot's focus topic.
+ */
+export function getTopicSourceText(
+  weeks: CourseWeek[],
+  weekIds: string[],
+  topics?: string[] | null
+): Record<string, string> {
+  const selectedWeeks = weeks.filter((week) => weekIds.includes(week.id));
+  const wantedTopics = topics && topics.length > 0 ? new Set(topics.map(normalizeTopic)) : null;
+
+  const map: Record<string, string> = {};
+  for (const week of selectedWeeks) {
+    const weekTopics = wantedTopics
+      ? week.topics.filter((topic) => wantedTopics.has(normalizeTopic(topic)))
+      : week.topics;
+    const index = topicTextByWeek[week.id];
+    const weekFull = fullWeekText(week);
+    for (const topic of weekTopics) {
+      const passage = index?.[topic]?.trim();
+      const text = passage || weekFull;
+      if (text) map[topic] = text;
+    }
+  }
+  return map;
+}

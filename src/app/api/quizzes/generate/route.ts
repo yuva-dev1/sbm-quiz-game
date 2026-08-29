@@ -9,7 +9,8 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return Response.json({ error: parsed.error }, { status: parsed.status });
   }
-  const { questionCount, difficulty, mode, weekIds, scopeTopics, coverageLabel, sourceText, existingQuestions } = parsed.value;
+  const { questionCount, difficulty, mode, weekIds, scopeTopics, coverageLabel, sourceText, topicSourceText, existingQuestions } =
+    parsed.value;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
         const generated = await generateQuiz({
           topics: scopeTopics,
           sourceText,
+          topicSourceText,
           questionCount,
           difficulty,
           coverageLabel,

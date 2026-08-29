@@ -5,7 +5,7 @@
  * counts as a valid request.
  */
 
-import { getCourseCatalog, resolveGenerationScope, getSourceText } from "@/lib/courseCatalog";
+import { getCourseCatalog, resolveGenerationScope, getSourceText, getTopicSourceText } from "@/lib/courseCatalog";
 import { firestore } from "@/lib/firestore";
 import type { GeneratedQuestion } from "@/lib/localQuizGenerator";
 
@@ -31,6 +31,11 @@ export type GenerateQuizRequest = {
   scopeTopics: string[];
   coverageLabel: string;
   sourceText: string;
+  /** Per-topic scoped grounding passages (catalog topic → excerpt) for
+   * per-slot grounding in localQuizGenerator — see getTopicSourceText.
+   * `sourceText` above stays the run-wide fallback for topics with no index
+   * entry. */
+  topicSourceText: Record<string, string>;
   /** Prior quizzes' questions, most recent first — seeds generation's
    * duplicate-avoidance beyond just the questions drafted in this one run. */
   existingQuestions: GeneratedQuestion[];
@@ -77,13 +82,15 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
     return { ok: false, error: "No topics found for that week/topic combination. Try 'All topics'.", status: 400 };
   }
 
-  // Topic-scoped grounding (just the selected topics' excerpts instead of the
-  // whole week's notes — see getSourceText) is limited to SELF_PACED quizzes.
-  // A LIVE (Kahoot) quiz always gets the full week's notes, so this
-  // optimisation can never change what a live session serves. Empty
-  // requestedTopics means "all topics", which is the full week either way.
-  const useTopicScope = mode === "SELF_PACED" && requestedTopics.length > 0;
-  const sourceText = getSourceText(catalog, weekIds, useTopicScope ? scopeTopics : null);
+  // `sourceText` is the full selected-weeks notes — the run-wide fallback.
+  // The per-slot scoping that actually cuts self-hosted latency happens in
+  // localQuizGenerator off `topicSourceText`: each slot is grounded in just
+  // its focus topic's hand-authored passage(s). This applies to LIVE
+  // (Kahoot) quizzes too — a slot still sees real, on-topic source text, and
+  // the verbatim / faithfulness checks run against exactly that per-slot
+  // text, so grounding is not weakened, only narrowed per question.
+  const sourceText = getSourceText(catalog, weekIds, null);
+  const topicSourceText = getTopicSourceText(catalog, weekIds, scopeTopics);
 
   // Only MULTIPLE_CHOICE/TRUE_FALSE match what the generator itself ever
   // produces (and what findDuplicate's answer/choice-overlap check expects)
@@ -148,6 +155,7 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
       scopeTopics,
       coverageLabel,
       sourceText,
+      topicSourceText,
       existingQuestions,
     },
   };

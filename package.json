@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "ably": "^2.26.0",
-    "autoevals": "^0.0.132",
     "dotenv": "^17.4.2",
     "firebase-admin": "^14.2.0",
     "ioredis": "^6.0.0",

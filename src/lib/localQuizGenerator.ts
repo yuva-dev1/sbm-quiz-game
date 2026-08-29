@@ -1,42 +1,46 @@
 /**
- * Generates Bhagavatam class quiz questions in-house via OpenRouter, one
- * question at a time (bounded concurrency), instead of calling out to an
- * external RAG service. Grounded in the actual course-note text for the
- * selected week(s) (src/lib/courseCatalog.ts's getSourceText(), backed by
- * src/data/courseNotes.json) rather than the model's own general knowledge
- * — the source excerpt is included directly in every generation prompt
- * (the whole corpus is small enough that no chunking/retrieval is needed),
- * and each candidate is checked with autoevals' Faithfulness metric
- * (src/lib/faithfulness.ts) before being accepted.
+ * Generates Bhagavatam class quiz questions in-house, one question at a time
+ * (bounded concurrency), instead of calling out to an external RAG service.
+ * Grounded in the actual course-note text for the selected week(s) — but
+ * per slot, not per run: each slot is assigned a focus topic and shown only
+ * that topic's hand-authored passage(s) (src/lib/courseCatalog.ts's
+ * getTopicSourceText(), backed by src/data/courseTopicText.json), falling
+ * back to the run-wide sourceText only when a topic has no index entry.
+ * Inlining the whole selected-weeks corpus into every call was the dominant
+ * cost of a self-hosted generation (see docs/self-hosted-llm.md); a ~1-4k
+ * char per-slot passage keeps decode fast. Each candidate is checked by one
+ * combined LLM-judge call (src/lib/faithfulness.ts's judgeQuestion) against
+ * that same per-slot passage before being accepted.
  *
  * Each question slot gets its own model call so one bad response only costs
  * a single question, with a retry ladder per slot: primary model -> repair
  * retry (same model, shown its own bad output and, if the failure was low
- * faithfulness or a duplicate, told so) -> fallback model. On the
- * "openrouter" backend the faithfulness judge is always the *other* model
- * from whichever one drafted the candidate, so a model never grades its own
- * output; on the default "local" backend there is only one model, so it
- * grades its own draft — and the difficulty-tier and single-defensible-answer
- * judges (checkDifficultyMatch / checkAnswerable) are skipped there entirely
- * (weak signal from a 4B self-review, and a flaky self-"fail" only costs a
- * wasted repair round). Slots left empty (or knocked out by the cross-slot
- * duplicate sweep) after a pass are re-run in a further pass, looping until
- * every slot is filled or MAX_FILL_ROUNDS is hit — a single extra pass
- * wasn't enough headroom to reliably reach the requested question count for
- * smaller quizzes.
+ * faithfulness or a duplicate, told so) -> fallback model (openrouter only —
+ * on "local" primary == fallback, so the third attempt is skipped). The
+ * combined judge grades grounding, single-defensible-answer, and
+ * difficulty-tier fit together in one round trip. On "openrouter" it runs on
+ * the *other* model from whichever drafted the candidate, so a model never
+ * grades its own output, and gates on all three axes; on the default "local"
+ * backend there is only one model, so it grades its own draft and gates on
+ * grounding only (difficulty and answerability are weak signal from a 4B
+ * self-review, and a flaky self-"fail" only costs a wasted repair round).
+ * Slots left empty (or knocked out by the cross-slot duplicate sweep) after
+ * a pass are re-run in a further pass, looping until every slot is filled or
+ * MAX_FILL_ROUNDS is hit — a single extra pass wasn't enough headroom to
+ * reliably reach the requested question count for smaller quizzes.
  * Restricted to multiple_choice/true_false — the only types the live tap
  * UI can render (see Answer model's comment in schema.prisma).
  *
- * Answerability (checkAnswerable, multiple_choice only) catches a different
- * defect from faithfulness: a question whose marked answer is factually
- * correct per the source, but whose wording doesn't narrow the choices down
- * to just one of them — e.g. "who is first in the lineage of transmission"
- * with four choices that are all real, named members of that lineage. The
- * marked answer being true isn't enough; the question has to actually let a
- * student *reason their way* to it rather than guess among equally
- * plausible options. Uses a dedicated judge call (own prompt, not part of
- * autoevals' Faithfulness) since "is this true" and "does this question
- * have exactly one defensible answer" are different questions entirely.
+ * The single-defensible-answer axis (multiple_choice only) catches a
+ * different defect from faithfulness: a question whose marked answer is
+ * factually correct per the source, but whose wording doesn't narrow the
+ * choices down to just one of them — e.g. "who is first in the lineage of
+ * transmission" with four choices that are all real, named members of that
+ * lineage. The marked answer being true isn't enough; the question has to
+ * actually let a student *reason their way* to it rather than guess among
+ * equally plausible options. "Is this true" and "does this question have
+ * exactly one defensible answer" are different questions, judged by
+ * different criteria in the same combined call.
  *
  * Duplicate detection (findDuplicate) catches questions that reuse the same
  * fact even when reworded — e.g. two differently-phrased questions that
@@ -69,16 +73,18 @@
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { completeChat, type ChatMessage } from "@/lib/openrouter";
-import { scoreFaithfulness } from "@/lib/faithfulness";
+import { judgeQuestion } from "@/lib/faithfulness";
 import { llmBackend, generationModels, generationConcurrency } from "@/lib/llmBackend";
+import { beginRun, endRun, type LlmCallType } from "@/lib/llmTelemetry";
 import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS, DEFAULT_TIME_LIMIT_SECS } from "@/lib/timeLimits";
 
 // Draft models and concurrency are backend-dependent and resolved per call
 // in generateQuiz (see @/lib/llmBackend): the "openrouter" backend keeps the
-// gpt-4o-mini + gemini fallback at 32/16 parallel calls tuned here over
-// several Cloud Run runs (25-card/2-week draft as a single wave, no 429s);
-// the default "local" backend serves one model on one GPU, so both ladder
-// rungs are that same model and concurrency drops to LLM_CONCURRENCY (3).
+// gpt-4o-mini + gemini fallback at 32/16 parallel calls tuned over several
+// Cloud Run runs (25-card/2-week draft as a single wave, no 429s); the
+// default "local" backend serves one model on one GPU, so both ladder rungs
+// are that same model and concurrency is LLM_CONCURRENCY (default 6, small
+// per-slot prompts — see docs/self-hosted-llm.md).
 
 // Target share of a quiz that's true/false, the rest multiple_choice. Held
 // to an exact per-quiz quota (see assignQuestionTypes) rather than a
@@ -87,7 +93,6 @@ import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS, DEFAULT_TIME_LIMIT_SECS } fro
 // allows by chance even at the right long-run average (a 10-question quiz at
 // a 25% flip has a real chance of drawing 4-5 true/false).
 const TRUE_FALSE_RATIO = 0.2;
-const FAITHFULNESS_THRESHOLD = 0.7;
 const DUPLICATE_OVERLAP_THRESHOLD = 0.5;
 // Slightly higher than DUPLICATE_OVERLAP_THRESHOLD: explanations in this
 // course share a lot of recurring domain vocabulary ("Bhagavan", "Vyasa",
@@ -105,7 +110,11 @@ const CORE_FACT_OVERLAP_THRESHOLD = 0.45;
 // itself — findDuplicate below still checks the full list regardless of
 // this cap (free, no extra tokens); only the prompt text needs bounding,
 // especially once existingQuestions (prior quizzes' history) is involved.
-const MAX_AVOID_ENTRIES_IN_PROMPT = 25;
+// Kept small: on the self-hosted backend the avoid-list is dynamic tail
+// that can't be KV-cached, and only each entry's `core_fact` is sent now
+// (not its full question text + choices), so 12 short labels is plenty of
+// signal at a fraction of the tokens.
+const MAX_AVOID_ENTRIES_IN_PROMPT = 12;
 // The whole course-notes corpus is ~80KB (see src/data/courseNotes.json,
 // notes PDFs plus manually-transcribed infographics) — comfortably under
 // this even if a host selects every week at once. This is a safety cap
@@ -237,9 +246,10 @@ type FailureReason =
 
 /**
  * Writing instruction and judge criteria are defined together per tier
- * (rather than as two separately-maintained lists) so the difficulty
- * conformance judge (checkDifficultyMatch) can never reject a question for
- * failing to do something the generation prompt was never told to do — QA
+ * (rather than as two separately-maintained lists) so the difficulty axis of
+ * the combined judge (judgeQuestion, fed judgeCriteria here) can never
+ * reject a question for failing to do something the generation prompt was
+ * never told to do — QA
  * feedback was that "Discussion" (intermediate) and "Mixed" quizzes felt
  * indistinguishable from "Foundations" (beginner) because the old one-line
  * guidance ("connect two related ideas or explain significance") was too
@@ -398,117 +408,6 @@ function findDuplicate(candidate: GeneratedQuestion, existing: GeneratedQuestion
   return null;
 }
 
-const AnswerabilityJudgeSchema = z.object({
-  answerable: z.boolean(),
-  reason: z.string().optional(),
-});
-
-/**
- * Judges whether a multiple_choice question's wording actually narrows its
- * four choices down to one defensible answer, as opposed to the marked
- * answer merely being *a* true fact among several plausible-sounding ones.
- * See the module docstring for why this is separate from faithfulness.
- * Returns null (skip — don't block on it) if the judge call itself fails or
- * returns something unparseable; a validator outage shouldn't silently drop
- * an otherwise-good question.
- */
-async function checkAnswerable(question: GeneratedQuestion, sourceText: string, judgeModel: string): Promise<boolean | null> {
-  const messages: ChatMessage[] = [
-    {
-      role: "system",
-      content:
-        "You are a strict quality reviewer for multiple-choice quiz questions on the Srimad Bhagavatam. " +
-        "Respond with a single strict JSON object only — no markdown code fences, no commentary.",
-    },
-    {
-      role: "user",
-      content: [
-        sourceText.trim() ? `Source excerpt:\n"""\n${sourceText.trim()}\n"""\n` : "",
-        `Question: ${question.question}`,
-        `Choices: ${question.choices.join(" / ")}`,
-        `Marked correct answer: ${question.answer}`,
-        "",
-        "The bar is NOT just \"does the source support the marked answer\" — a question can be perfectly " +
-          "true and still be a bad question. It FAILS if the only way to pick the marked answer over the " +
-          "others is to have memorized an arbitrary sequence, list order, or position, when the other choices " +
-          "are otherwise equally valid members of the same category and nothing in the question or choices " +
-          "helps distinguish them. Concretely: \"Who is first in the lineage of transmission?\" with choices " +
-          "Vāsudeva / Brahma / Narada / Vyasa FAILS — all four are genuinely part of that lineage, and " +
-          "\"first\" is only recoverable by having memorized the exact numbered order, not by reasoning about " +
-          "the material. It PASSES if the question tests a relationship, distinguishing trait, or cause that " +
-          "the other choices clearly don't share (e.g. \"who is described as the original source that the " +
-          "entire lineage comes from?\", where the other names are downstream links, not the source itself).",
-        'Return JSON matching exactly this shape: {"answerable": true or false, "reason": "one short sentence"}',
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    },
-  ];
-
-  const raw = await tryComplete(judgeModel, messages);
-  if (!raw) return null;
-  try {
-    const result = AnswerabilityJudgeSchema.safeParse(JSON.parse(raw));
-    return result.success ? result.data.answerable : null;
-  } catch {
-    return null;
-  }
-}
-
-const DifficultyJudgeSchema = z.object({
-  matches: z.boolean(),
-  reason: z.string().optional(),
-});
-
-/**
- * Judges whether a drafted question actually matches the difficulty tier it
- * was written for, using the same pass/fail criteria (DIFFICULTY_SPEC) the
- * generation prompt was given — added because plain instruction text alone
- * wasn't reliably producing a felt difference between tiers (QA feedback:
- * "Discussion" and "Mixed" felt the same as "Foundations"). Returns null
- * (skip — don't block on it) if the judge call itself fails or returns
- * something unparseable, same as checkAnswerable.
- */
-async function checkDifficultyMatch(
-  question: GeneratedQuestion,
-  effectiveDifficulty: EffectiveDifficulty,
-  judgeModel: string
-): Promise<boolean | null> {
-  const spec = DIFFICULTY_SPEC[effectiveDifficulty];
-  const messages: ChatMessage[] = [
-    {
-      role: "system",
-      content:
-        "You are a strict quality reviewer checking whether a quiz question actually matches the difficulty " +
-        "tier it was written for. Respond with a single strict JSON object only — no markdown code fences, " +
-        "no commentary.",
-    },
-    {
-      role: "user",
-      content: [
-        `Question: ${question.question}`,
-        question.type === "multiple_choice" ? `Choices: ${question.choices.join(" / ")}` : "",
-        `Marked answer: ${question.answer}`,
-        "",
-        `Target difficulty tier: "${effectiveDifficulty}". ${spec.judgeCriteria}`,
-        "",
-        'Return JSON matching exactly this shape: {"matches": true or false, "reason": "one short sentence"}',
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    },
-  ];
-
-  const raw = await tryComplete(judgeModel, messages);
-  if (!raw) return null;
-  try {
-    const result = DifficultyJudgeSchema.safeParse(JSON.parse(raw));
-    return result.success ? result.data.matches : null;
-  } catch {
-    return null;
-  }
-}
-
 function clampSourceText(sourceText: string): string {
   if (sourceText.length <= MAX_SOURCE_TEXT_CHARS) return sourceText;
   return sourceText.slice(0, MAX_SOURCE_TEXT_CHARS) + "\n\n[...source truncated...]";
@@ -533,6 +432,16 @@ function buildSystemPrompt(grounded: boolean): string {
   );
 }
 
+/**
+ * Prompt layout is deliberate (see docs/self-hosted-llm.md): the per-slot
+ * scoped passage comes first, then a block of instructions that is
+ * byte-identical for every call of a given (grounded, type) shape, then —
+ * last — everything that varies slot to slot (coverage label, focus topic,
+ * difficulty writing instruction, avoid-list, JSON shape). Keeping all
+ * per-call variation at the tail lets a repair retry (which re-sends this
+ * exact first user message unchanged) and same-shape sibling slots reuse the
+ * llama.cpp KV prefix instead of re-prefilling it.
+ */
 function buildUserPrompt(params: {
   topics: string[];
   focusTopic: string | null;
@@ -543,9 +452,11 @@ function buildUserPrompt(params: {
   sourceText: string;
 }): string {
   const topicList = params.topics.length > 0 ? params.topics.join("; ") : params.coverageLabel;
+  const grounded = params.sourceText.trim().length > 0;
   const lines: string[] = [];
 
-  if (params.sourceText.trim()) {
+  // --- Scoped source passage (per-slot) ---
+  if (grounded) {
     lines.push(
       "Course-note excerpt (this is your ONLY source of truth — do not use outside knowledge, do not fill " +
         "gaps with plausible-sounding invented details, and do not draw on anything not explicitly written " +
@@ -559,16 +470,8 @@ function buildUserPrompt(params: {
     );
   }
 
+  // --- Fixed instruction block (identical for every call of this shape) ---
   lines.push(
-    `Course coverage: ${params.coverageLabel || topicList}.`,
-    params.focusTopic
-      ? `This question MUST test a specific fact from this topic: ${params.focusTopic}. Do not switch to a ` +
-          `different topic because the excerpt happens to say more about another one — write the best question ` +
-          `you can about this topic. (Full topic list for context: ${topicList}.)`
-      : `Topics to draw from: ${topicList}.`,
-    params.type === "multiple_choice"
-      ? `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}`
-      : `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}, phrased as a true/false statement.`,
     "Whatever the difficulty, the question must test something a student would have needed to actually " +
       "understand from the material — what someone did and the stated reason, the cause or outcome of an " +
       "event, the relationship between two named figures, or the point a passage is making. Do NOT build the " +
@@ -577,48 +480,6 @@ function buildUserPrompt(params: {
       "to a list the source enumerates. This applies to true/false statements too — do not write one that just " +
       "asserts a count, or that just asserts an item is (or isn't) in such a list. And for multiple choice, do " +
       "not write a question where more than one of the four choices is a true statement from the source."
-  );
-
-  if (params.avoidEntries.length > 0) {
-    lines.push(
-      "Do not test the same underlying fact, reuse the same correct answer, or reuse the same answer " +
-        "choices (even reordered) as any of these already-used questions — pick a different specific " +
-        "detail or aspect instead, even if it's the same general topic. This course's material restates " +
-        "its central themes (e.g. \"the point of it all is devotion to Bhagavan\") in several different " +
-        "passages — a question can be worded completely differently from one of these and still be testing " +
-        "the same fact underneath, which is exactly what to avoid; check against each one's core_fact, not " +
-        "just its question text:",
-      ...params.avoidEntries.slice(0, MAX_AVOID_ENTRIES_IN_PROMPT).map((q) =>
-        q.type === "multiple_choice"
-          ? `- "${q.question}" — choices: ${q.choices.join(" / ")}; answer: ${q.answer}; core_fact: ${q.coreFact}`
-          : `- "${q.question}" — answer: ${q.answer}; core_fact: ${q.coreFact}`
-      )
-    );
-  }
-
-  lines.push(
-    "Also include \"core_fact\": a short (5-12 word) canonical, plainly-worded restatement of the one " +
-      "specific fact or claim this question tests (e.g. \"Narada's reason for urging Vyasa to compose a " +
-      "scripture\") — not a copy of the question or answer text, just a terse label for the underlying fact, " +
-      "so it can be checked against the core_fact of already-used questions above."
-  );
-  const grounded = params.sourceText.trim().length > 0;
-  if (grounded) {
-    lines.push(
-      "Also include \"source_excerpt\": a short phrase or sentence (roughly 6-25 words) copied verbatim, " +
-        "word-for-word, straight from the course-note excerpt above — the exact text that most directly " +
-        "supports this question's answer. Quote a single contiguous run of text exactly as written there; do " +
-        "not paraphrase or splice together separate sentences. This is what lets a host verify the question " +
-        "against the source material later, so it must be real, checkable text, not a summary."
-    );
-  }
-  lines.push("Return JSON matching exactly this shape:");
-  const shapeTail = grounded ? ',"source_excerpt":"..."}' : "}";
-  lines.push(
-    params.type === "multiple_choice"
-      ? '{"type":"multiple_choice","question":"...","choices":["...","...","...","..."],"answer":"<one of the four choices, verbatim>","explanation":"...","core_fact":"..."' +
-          shapeTail
-      : '{"type":"true_false","question":"...","answer":"True" or "False","explanation":"...","core_fact":"..."' + shapeTail
   );
   if (params.type === "multiple_choice") {
     lines.push(
@@ -632,7 +493,7 @@ function buildUserPrompt(params: {
         "Prefer testing a relationship, distinguishing trait, or cause instead (e.g. who something originates " +
         "from, who directly did X, what makes one option different in kind from the others)."
     );
-    if (params.sourceText.trim()) {
+    if (grounded) {
       lines.push(
         "The correct answer must be a fact the excerpt clearly states or directly implies, worded closely to " +
           "the source. The three wrong choices should NOT be lifted from the excerpt; write those freely so " +
@@ -640,6 +501,61 @@ function buildUserPrompt(params: {
       );
     }
   }
+  lines.push(
+    "Also include \"core_fact\": a short (5-12 word) canonical, plainly-worded restatement of the one " +
+      "specific fact or claim this question tests (e.g. \"Narada's reason for urging Vyasa to compose a " +
+      "scripture\") — not a copy of the question or answer text, just a terse label for the underlying fact, " +
+      "so it can be checked against the core_fact of already-used questions."
+  );
+  if (grounded) {
+    lines.push(
+      "Also include \"source_excerpt\": a short phrase or sentence (roughly 6-25 words) copied verbatim, " +
+        "word-for-word, straight from the course-note excerpt above — the exact text that most directly " +
+        "supports this question's answer. Quote a single contiguous run of text exactly as written there; do " +
+        "not paraphrase or splice together separate sentences. This is what lets a host verify the question " +
+        "against the source material later, so it must be real, checkable text, not a summary."
+    );
+  }
+
+  // --- Per-call variable tail (everything that changes slot to slot) ---
+  lines.push(
+    "",
+    `Course coverage: ${params.coverageLabel || topicList}.`,
+    params.focusTopic
+      ? `This question MUST test a specific fact from this topic: ${params.focusTopic}. Do not switch to a ` +
+          `different topic because the excerpt happens to say more about another one — write the best question ` +
+          `you can about this topic. (Full topic list for context: ${topicList}.)`
+      : `Topics to draw from: ${topicList}.`,
+    params.type === "multiple_choice"
+      ? `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}`
+      : `Write ${DIFFICULTY_SPEC[params.effectiveDifficulty].writingInstruction}, phrased as a true/false statement.`
+  );
+
+  if (params.avoidEntries.length > 0) {
+    const avoidFacts = params.avoidEntries
+      .map((q) => q.coreFact.trim())
+      .filter(Boolean)
+      .slice(0, MAX_AVOID_ENTRIES_IN_PROMPT);
+    if (avoidFacts.length > 0) {
+      lines.push(
+        "Do not test the same underlying fact, reuse the same correct answer, or reuse the same answer " +
+          "choices (even reordered) as any already-used question. This course's material restates its " +
+          "central themes in several different passages, so a question worded completely differently can " +
+          "still be testing the same fact underneath — that is exactly what to avoid. Pick a different " +
+          "specific detail or aspect, even within the same topic. Facts already used (by core_fact):",
+        ...avoidFacts.map((fact) => `- ${fact}`)
+      );
+    }
+  }
+
+  lines.push("Return JSON matching exactly this shape:");
+  const shapeTail = grounded ? ',"source_excerpt":"..."}' : "}";
+  lines.push(
+    params.type === "multiple_choice"
+      ? '{"type":"multiple_choice","question":"...","choices":["...","...","...","..."],"answer":"<one of the four choices, verbatim>","explanation":"...","core_fact":"..."' +
+          shapeTail
+      : '{"type":"true_false","question":"...","answer":"True" or "False","explanation":"...","core_fact":"..."' + shapeTail
+  );
 
   return lines.join("\n");
 }
@@ -736,12 +652,70 @@ function computeTimeLimitSecs(question: GeneratedQuestion, effectiveDifficulty: 
   return Math.min(MAX_TIME_LIMIT_SECS, Math.max(MIN_TIME_LIMIT_SECS, rounded));
 }
 
-async function tryComplete(model: string, messages: ChatMessage[]): Promise<string | null> {
+async function tryComplete(
+  model: string,
+  messages: ChatMessage[],
+  callType: LlmCallType
+): Promise<string | null> {
   try {
-    return await completeChat(model, messages);
+    return await completeChat(model, messages, callType);
   } catch {
     return null;
   }
+}
+
+// Per-slot grounding bounds (chars). A pinned slot gets its focus topic's
+// passage plus enough sibling scope passages to clear the floor — a lone
+// ~300-char passage is too thin to draw a good question from — while staying
+// far below the ~110k chars a full "all weeks" corpus used to inline into
+// every call. The unpinned relaxed top-up gets the union of the scope's
+// passages up to a larger cap so it can range across the whole selection.
+const MIN_FOCUS_SCOPE_CHARS = 2500;
+const MAX_FOCUS_SCOPE_CHARS = 6000;
+const MAX_UNION_SCOPE_CHARS = 16000;
+
+/**
+ * The exact grounding text one slot's draft/repair/judge calls all see.
+ * `topicSourceText` maps each in-scope catalog topic to its hand-authored
+ * passage (see courseCatalog.getTopicSourceText); `fullSourceText` is the
+ * run-wide fallback for when that map is empty or has no entry for the
+ * slot's focus topic. Everything downstream — isVerbatimInSource, the
+ * source_excerpt check, judgeQuestion — is handed this same string, so
+ * grounding is always checked against precisely what the model was shown.
+ */
+function resolveSlotSourceText(
+  focusTopic: string | null,
+  scopeTopics: string[],
+  topicSourceText: Record<string, string>,
+  fullSourceText: string
+): string {
+  if (Object.keys(topicSourceText).length === 0) return fullSourceText;
+
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  const add = (topic: string) => {
+    const passage = topicSourceText[topic]?.trim();
+    if (passage && !seen.has(passage)) {
+      seen.add(passage);
+      ordered.push(passage);
+    }
+  };
+
+  if (focusTopic) {
+    add(focusTopic);
+    if (ordered.length === 0) return fullSourceText; // focus topic isn't indexed
+  }
+  for (const topic of scopeTopics) add(topic);
+
+  const cap = focusTopic ? MAX_FOCUS_SCOPE_CHARS : MAX_UNION_SCOPE_CHARS;
+  const floor = focusTopic ? MIN_FOCUS_SCOPE_CHARS : Number.POSITIVE_INFINITY;
+  let out = "";
+  for (const passage of ordered) {
+    if (out && out.length + 2 + passage.length > cap) break;
+    out = out ? `${out}\n\n${passage}` : passage;
+    if (out.length >= floor) break;
+  }
+  return out || fullSourceText;
 }
 
 type AttemptResult =
@@ -773,8 +747,9 @@ async function attemptDraft(params: {
   sourceText: string;
   avoidEntries: GeneratedQuestion[];
   relax: RelaxLevel;
+  callType: LlmCallType;
 }): Promise<AttemptResult> {
-  const raw = await tryComplete(params.model, params.messages);
+  const raw = await tryComplete(params.model, params.messages, params.callType);
   if (!raw) return { ok: false, reason: "invalid_json", raw: null };
 
   const parsed = parseDraft(raw, params.type);
@@ -814,44 +789,70 @@ async function attemptDraft(params: {
     return { ok: false, reason: "duplicate", raw, duplicateOf: duplicate.question };
   }
 
-  // LLM-judge checks, dialled back by relax level (see RelaxLevel):
-  //   bare  → none at all (schema-valid + non-duplicate is the whole bar)
-  //   all   → faithfulness only
-  //   shape → faithfulness + difficulty tier
-  //   none  → all three (they're independent, so they run concurrently
-  //           rather than as three back-to-back round trips)
+  // One combined LLM-judge call (faithfulness.ts's judgeQuestion) replaces
+  // what used to be three separate round trips. Which axes it's actually
+  // asked to gate on depends on the relax level (see RelaxLevel):
+  //   bare  → no judge call at all (schema-valid + non-duplicate is the bar)
+  //   all   → grounding only
+  //   shape → grounding + difficulty tier
+  //   none  → grounding + difficulty tier + single-defensible-answer
   //
-  // The "local" backend additionally skips the difficulty-tier and
-  // single-defensible-answer judges entirely: they'd be a 4B model grading
-  // its own draft (primary == judge in that mode), which is weak signal and,
-  // worse, a flaky self-"fail" here triggers a wasted repair round trip —
-  // roughly half the per-slot model calls for little benefit. Faithfulness
-  // still runs (it's a distinct RAGAS metric, not a yes/no self-review) and
-  // still fails open + logs if the small model can't complete it.
+  // The "local" backend never gates on difficulty or answerability: that's a
+  // 4B model grading its own draft (primary == judge there), weak signal
+  // whose flaky "fail" only costs a wasted repair round. Grounding still
+  // runs, and the whole call still fails open (null verdict → keep the
+  // draft) so a judge hiccup never silently drops a good question.
   if (params.relax === "bare") {
     return { ok: true, question: parsed };
   }
 
+  const grounded = params.sourceText.trim().length > 0;
   const selfJudgeOnly = llmBackend() === "local";
-  const runDifficulty = !selfJudgeOnly && (params.relax === "none" || params.relax === "shape");
-  const runAnswerable = !selfJudgeOnly && params.relax === "none";
-  const answerClaim = `${parsed.answer}. ${parsed.explanation}`;
-  const [difficultyMatches, faithfulness, answerable] = await Promise.all([
-    runDifficulty ? checkDifficultyMatch(parsed, params.effectiveDifficulty, params.judgeModel) : Promise.resolve(null),
-    scoreFaithfulness(parsed.question, answerClaim, params.sourceText, params.judgeModel),
-    runAnswerable && parsed.type === "multiple_choice"
-      ? checkAnswerable(parsed, params.sourceText, params.judgeModel)
-      : Promise.resolve(null),
-  ]);
+  const gateDifficulty = !selfJudgeOnly && (params.relax === "none" || params.relax === "shape");
+  const gateAnswerable = !selfJudgeOnly && params.relax === "none" && parsed.type === "multiple_choice";
 
-  if (difficultyMatches === false) {
-    return { ok: false, reason: "difficulty_mismatch", raw };
+  // Grounding short-circuit: if the model's cited source_excerpt is verbatim
+  // in the passage (already checked above unless fully relaxed) AND the
+  // marked answer itself appears verbatim there too, the question is
+  // grounded by construction — skip the LLM grounding check. multiple_choice
+  // only: a true_false answer ("True"/"False") is never a meaningful
+  // verbatim hit, and its statement is often a deliberate paraphrase worth
+  // judging.
+  const groundingShortCircuit =
+    grounded &&
+    parsed.type === "multiple_choice" &&
+    !!parsed.sourceExcerpt &&
+    isVerbatimInSource(parsed.sourceExcerpt, params.sourceText) &&
+    isVerbatimInSource(parsed.answer, params.sourceText);
+  const gateFaithful = grounded && !groundingShortCircuit;
+
+  if (!gateFaithful && !gateDifficulty && !gateAnswerable) {
+    return { ok: true, question: parsed };
   }
-  if (faithfulness !== null && faithfulness < FAITHFULNESS_THRESHOLD) {
-    return { ok: false, reason: "low_faithfulness", raw };
-  }
-  if (parsed.type === "multiple_choice" && answerable === false) {
-    return { ok: false, reason: "ambiguous", raw };
+
+  const verdict = await judgeQuestion({
+    question: parsed.question,
+    type: parsed.type,
+    choices: parsed.choices,
+    answer: parsed.answer,
+    explanation: parsed.explanation,
+    sourceText: params.sourceText,
+    judgeModel: params.judgeModel,
+    askFaithful: gateFaithful,
+    askAnswerable: gateAnswerable,
+    difficultyCriteria: gateDifficulty ? DIFFICULTY_SPEC[params.effectiveDifficulty].judgeCriteria : null,
+  });
+
+  if (verdict) {
+    if (gateDifficulty && verdict.difficultyMatch === false) {
+      return { ok: false, reason: "difficulty_mismatch", raw };
+    }
+    if (gateFaithful && verdict.faithful === false) {
+      return { ok: false, reason: "low_faithfulness", raw };
+    }
+    if (gateAnswerable && verdict.answerable === false) {
+      return { ok: false, reason: "ambiguous", raw };
+    }
   }
 
   return { ok: true, question: parsed };
@@ -926,14 +927,27 @@ async function generateSlot(params: {
   difficulty: Difficulty;
   avoidEntries: GeneratedQuestion[];
   sourceText: string;
+  topicSourceText: Record<string, string>;
   primaryModel: string;
   fallbackModel: string;
   relax: RelaxLevel;
+  /** "draft" for the first fill round, "repair" for later rounds and the
+   *  top-up — observability only (see llmTelemetry.ts). */
+  callType: LlmCallType;
 }): Promise<GeneratedQuestion | null> {
   const type = params.type;
   const effectiveDifficulty = pickEffectiveDifficulty(params.difficulty);
+  // Every call for this slot — draft, repair, and the judge — is grounded in
+  // this one string, so grounding is always checked against exactly what the
+  // model saw.
+  const slotSourceText = resolveSlotSourceText(
+    params.focusTopic,
+    params.topics,
+    params.topicSourceText,
+    params.sourceText
+  );
   const messages: ChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(params.sourceText.trim().length > 0) },
+    { role: "system", content: buildSystemPrompt(slotSourceText.trim().length > 0) },
     {
       role: "user",
       content: buildUserPrompt({
@@ -943,7 +957,7 @@ async function generateSlot(params: {
         type,
         effectiveDifficulty,
         avoidEntries: params.avoidEntries,
-        sourceText: params.sourceText,
+        sourceText: slotSourceText,
       }),
     },
   ];
@@ -954,9 +968,10 @@ async function generateSlot(params: {
     messages,
     type,
     effectiveDifficulty,
-    sourceText: params.sourceText,
+    sourceText: slotSourceText,
     avoidEntries: params.avoidEntries,
     relax: params.relax,
+    callType: params.callType,
   });
   if (first.ok) return withTimeLimit(first.question, effectiveDifficulty);
 
@@ -971,18 +986,21 @@ async function generateSlot(params: {
       messages: repairMessages,
       type,
       effectiveDifficulty,
-      sourceText: params.sourceText,
+      sourceText: slotSourceText,
       avoidEntries: params.avoidEntries,
       relax: params.relax,
+      callType: "repair",
     });
     if (second.ok) return withTimeLimit(second.question, effectiveDifficulty);
   }
 
-  // Relaxed slots (the end-of-run top-up) stop after the repair retry — no
-  // fallback-model third attempt. The repair pass is worth keeping (it's
-  // what nudges a slot off a duplicate fact), but a whole extra model round
-  // trip per still-failing slot is what makes a large top-up drag.
-  if (params.relax !== "none") return null;
+  // Stop after the one repair retry when there's no genuinely different
+  // model to escalate to (LLM_BACKEND=local: primaryModel == fallbackModel,
+  // so a third attempt is just another identical sample for one more slow
+  // call) or for relaxed top-up slots (a whole extra round trip per
+  // still-failing slot is what makes a large top-up drag). Only the
+  // "openrouter" backend, with a real second model, runs the third attempt.
+  if (params.relax !== "none" || params.primaryModel === params.fallbackModel) return null;
 
   const third = await attemptDraft({
     model: params.fallbackModel,
@@ -990,9 +1008,10 @@ async function generateSlot(params: {
     messages,
     type,
     effectiveDifficulty,
-    sourceText: params.sourceText,
+    sourceText: slotSourceText,
     avoidEntries: params.avoidEntries,
     relax: params.relax,
+    callType: "repair",
   });
   return third.ok ? withTimeLimit(third.question, effectiveDifficulty) : null;
 }
@@ -1021,6 +1040,13 @@ function logLocalSelfJudgeOnce(model: string): void {
 export async function generateQuiz(params: {
   topics: string[];
   sourceText: string;
+  /** Per-topic scoped grounding passages (catalog topic → excerpt), from
+   * courseCatalog.getTopicSourceText. When present, each slot is grounded in
+   * just its focus topic's passage(s) instead of `sourceText` — the single
+   * biggest latency lever on the self-hosted backend (see
+   * docs/self-hosted-llm.md). Absent/empty falls back to `sourceText` for
+   * every slot, i.e. the pre-scoping behaviour. */
+  topicSourceText?: Record<string, string>;
   questionCount: number;
   difficulty: Difficulty;
   coverageLabel: string;
@@ -1033,7 +1059,20 @@ export async function generateQuiz(params: {
   const { concurrency, topupConcurrency } = generationConcurrency();
   if (llmBackend() === "local") logLocalSelfJudgeOnce(primaryModel);
   const sourceText = clampSourceText(params.sourceText);
+  const topicSourceText = params.topicSourceText ?? {};
   const existingQuestions = params.existingQuestions ?? [];
+
+  beginRun();
+  const logRunSummary = () => {
+    const s = endRun();
+    console.log(
+      `[localQuizGenerator] generation summary: ${(s.wallMs / 1000).toFixed(1)}s wall, ${s.callCount} LLM ` +
+        `calls (${s.callsByType.draft} draft / ${s.callsByType.repair} repair / ${s.callsByType.judge} judge), ` +
+        `${s.totalPromptTokens} prompt + ${s.totalCompletionTokens} completion tokens` +
+        `${s.tokensPartlyEstimated ? " (some estimated)" : ""}, median draft/repair prompt ` +
+        `${s.medianGenerationPromptTokens} tokens`
+    );
+  };
 
   // Round-robin a shuffled topic order across slots (rather than handing
   // every call the same full topic list) so questions spread across the
@@ -1074,9 +1113,11 @@ export async function generateQuiz(params: {
           difficulty: params.difficulty,
           avoidEntries,
           sourceText,
+          topicSourceText,
           primaryModel,
           fallbackModel,
           relax: "none",
+          callType: round === 0 ? "draft" : "repair",
         });
         completedCount++;
         params.onProgress?.({ phase, completed: completedCount, total: params.questionCount });
@@ -1137,6 +1178,7 @@ export async function generateQuiz(params: {
 
   const questions = slots.filter((q): q is GeneratedQuestion => q !== null);
   if (questions.length === 0) {
+    logRunSummary();
     throw new QuizGenerationError("The generator could not produce any usable questions. Try again.");
   }
 
@@ -1175,9 +1217,11 @@ export async function generateQuiz(params: {
               difficulty: params.difficulty,
               avoidEntries: [...existingQuestions, ...questions],
               sourceText,
+              topicSourceText,
               primaryModel,
               fallbackModel,
               relax,
+              callType: "repair",
             })
           );
         }
@@ -1204,5 +1248,6 @@ export async function generateQuiz(params: {
       ? `Covering ${params.topics.slice(0, 3).join(", ")}${params.topics.length > 3 ? ", and more" : ""}.`
       : "";
 
+  logRunSummary();
   return { title, description, questions };
 }

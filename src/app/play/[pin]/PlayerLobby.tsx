@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createSessionRealtimeClient } from "@/lib/ably-client";
+import { subscribeToSession } from "@/lib/sessionBroadcastClient";
 import {
   SessionEvent,
   type AnswerBreakdownPayload,
@@ -19,7 +19,6 @@ import { ANSWER_TILE_COLORS } from "@/lib/answerShapes";
 import { QuoteOverlay } from "@/components/QuoteOverlay";
 import { savePlayerSession } from "@/lib/playerSession";
 import { Confetti } from "@/components/Confetti";
-import type { InboundMessage } from "ably";
 
 const LATENCY_REFRESH_MS = 45_000;
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -30,6 +29,7 @@ export function PlayerLobby({
   pin,
   playerId,
   nickname,
+  initialBroadcastSeq,
   questionCount,
   initialGameStarted,
   initialPodium,
@@ -44,6 +44,7 @@ export function PlayerLobby({
   pin: string;
   playerId: string;
   nickname: string;
+  initialBroadcastSeq: number;
   questionCount: number;
   initialGameStarted: boolean;
   initialPodium: LeaderboardEntry[] | null;
@@ -129,70 +130,50 @@ export function PlayerLobby({
   const submittingRef = useRef(false);
 
   useEffect(() => {
-    const client = createSessionRealtimeClient(pin, playerId);
-    const channel = client.channels.get(`game:${pin}`);
-    const onGameStarted = () => setGameStarted(true);
-    const onQuestionStart = (message: InboundMessage) => {
-      setQuestion(message.data as QuestionStartPayload);
-      setLocked(false);
-      setRevealedAnswers(null);
-      setMyChoices([]);
-      setSelectedIndices([]);
-      setSubmitError(null);
-      setMyRank(null);
-      setLeaderboard(null);
-      setActiveQuote(null);
-      setAnswerBreakdown(null);
-      // Hide immediately (same commit as the new question) — the effect
-      // above only handles scheduling the eventual reveal, not this reset.
-      setOptionsVisible(false);
-      submittingRef.current = false;
-    };
-    const onQuoteDisplay = (message: InboundMessage) => {
-      setActiveQuote(message.data as QuoteDisplayPayload);
-    };
-    const onQuestionLocked = (message: InboundMessage) => {
-      const data = message.data as QuestionLockedPayload;
-      setLocked(true);
-      setRevealedAnswers(data.correctChoices);
-    };
-    const onLeaderboardUpdate = (message: InboundMessage) => {
-      setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
-    };
-    const onPodium = (message: InboundMessage) => {
-      const data = message.data as PodiumPayload;
-      setPodium(data.podium);
-    };
-    const onSettingsUpdate = (message: InboundMessage) => {
-      const data = message.data as SettingsUpdatePayload;
-      setShowLeaderboard(data.showLeaderboard);
-      setShowTimer(data.showTimer);
-    };
-    const onAnswerBreakdown = (message: InboundMessage) => {
-      setAnswerBreakdown(message.data as AnswerBreakdownPayload);
-    };
-
-    channel.subscribe(SessionEvent.GameStarted, onGameStarted);
-    channel.subscribe(SessionEvent.QuoteDisplay, onQuoteDisplay);
-    channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
-    channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
-    channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
-    channel.subscribe(SessionEvent.Podium, onPodium);
-    channel.subscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
-    channel.subscribe(SessionEvent.AnswerBreakdown, onAnswerBreakdown);
-
-    return () => {
-      channel.unsubscribe(SessionEvent.GameStarted, onGameStarted);
-      channel.unsubscribe(SessionEvent.QuoteDisplay, onQuoteDisplay);
-      channel.unsubscribe(SessionEvent.QuestionStart, onQuestionStart);
-      channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
-      channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
-      channel.unsubscribe(SessionEvent.Podium, onPodium);
-      channel.unsubscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
-      channel.unsubscribe(SessionEvent.AnswerBreakdown, onAnswerBreakdown);
-      client.close();
-    };
-  }, [pin, playerId]);
+    return subscribeToSession(pin, initialBroadcastSeq, ({ name, data }) => {
+      switch (name) {
+        case SessionEvent.GameStarted:
+          setGameStarted(true);
+          break;
+        case SessionEvent.QuoteDisplay:
+          setActiveQuote(data as QuoteDisplayPayload);
+          break;
+        case SessionEvent.QuestionStart:
+          setQuestion(data as QuestionStartPayload);
+          setLocked(false);
+          setRevealedAnswers(null);
+          setMyChoices([]);
+          setSelectedIndices([]);
+          setSubmitError(null);
+          setMyRank(null);
+          setLeaderboard(null);
+          setActiveQuote(null);
+          setAnswerBreakdown(null);
+          // Hide immediately (same commit as the new question) — the effect
+          // above only handles scheduling the eventual reveal, not this reset.
+          setOptionsVisible(false);
+          submittingRef.current = false;
+          break;
+        case SessionEvent.QuestionLocked:
+          setLocked(true);
+          setRevealedAnswers((data as QuestionLockedPayload).correctChoices);
+          break;
+        case SessionEvent.LeaderboardUpdate:
+          setLeaderboard((data as LeaderboardUpdatePayload).leaderboard);
+          break;
+        case SessionEvent.Podium:
+          setPodium((data as PodiumPayload).podium);
+          break;
+        case SessionEvent.SettingsUpdate:
+          setShowLeaderboard((data as SettingsUpdatePayload).showLeaderboard);
+          setShowTimer((data as SettingsUpdatePayload).showTimer);
+          break;
+        case SessionEvent.AnswerBreakdown:
+          setAnswerBreakdown(data as AnswerBreakdownPayload);
+          break;
+      }
+    });
+  }, [pin, initialBroadcastSeq]);
 
   // No auto-clear timer here — the quote stays up until the host reveals
   // the question, and the resulting question_start broadcast is what
@@ -200,7 +181,7 @@ export function PlayerLobby({
 
   // Story 5.2: fetch our own rank once a question locks — a plain
   // authenticated GET is as private as this needs to be (see the rank
-  // route's own comment for why this beats a per-player Ably channel). This
+  // route's own comment for why this beats a per-player realtime channel). This
   // still backs the mid-question "Your rank" line further down — it's a
   // separate feature from the end-of-game screen, which no longer shows rank.
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { firestore } from "@/lib/firestore";
 import { notFound } from "next/navigation";
 import { HostLobby } from "./HostLobby";
+import { sessionBroadcastRef } from "@/lib/sessionBroadcast";
 import type { LeaderboardEntry, QuestionStartPayload } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
@@ -30,11 +31,12 @@ export default async function HostLobbyPage({
   // submitAnswer — no per-question count query needed here, unlike the
   // Prisma version's nested _count include), players, and the top-3
   // results. See the migration plan's Phase 1 "deep nested reads" design.
-  const [quizSnap, questionsSnap, playersSnap, resultsSnap] = await Promise.all([
+  const [quizSnap, questionsSnap, playersSnap, resultsSnap, broadcastSnap] = await Promise.all([
     firestore.collection("quizzes").doc(session.quizId).get(),
     sessionDoc.ref.collection("sessionQuestions").orderBy("order").get(),
     sessionDoc.ref.collection("players").orderBy("joinedAt", "asc").get(),
     sessionDoc.ref.collection("results").orderBy("rank", "asc").limit(3).get(),
+    sessionBroadcastRef(pin).get(),
   ]);
 
   const questions = questionsSnap.docs.map((doc) => {
@@ -86,6 +88,8 @@ export default async function HostLobbyPage({
   return (
     <HostLobby
       pin={session.pin as string}
+      sessionId={sessionDoc.id}
+      initialBroadcastSeq={(broadcastSnap.data()?.seq as number | undefined) ?? 0}
       quizTitle={quizSnap.data()?.title as string}
       questionCount={questions.length}
       initialPlayers={players}

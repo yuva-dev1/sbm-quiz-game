@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { createSessionRealtimeClient } from "@/lib/ably-client";
+import { subscribeToSession, subscribeToRoster } from "@/lib/sessionBroadcastClient";
 import {
   SessionEvent,
   type AnswerBreakdownPayload,
@@ -20,7 +20,6 @@ import { ANSWER_TILE_COLORS } from "@/lib/answerShapes";
 import { retryLobbyMusicIfPaused, startLobbyMusic, stopLobbyMusic } from "@/lib/lobbyMusic";
 import { QuoteOverlay } from "@/components/QuoteOverlay";
 import { Confetti } from "@/components/Confetti";
-import type { InboundMessage } from "ably";
 
 type Player = { id: string; nickname: string };
 
@@ -28,6 +27,8 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 
 export function HostLobby({
   pin,
+  sessionId,
+  initialBroadcastSeq,
   quizTitle,
   questionCount,
   initialPlayers,
@@ -42,6 +43,8 @@ export function HostLobby({
   initialShowTimer,
 }: {
   pin: string;
+  sessionId: string;
+  initialBroadcastSeq: number;
   quizTitle: string;
   questionCount: number;
   initialPlayers: Player[];
@@ -59,7 +62,6 @@ export function HostLobby({
   const [started, setStarted] = useState(initialStarted);
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const seenPlayerIds = useRef(new Set(initialPlayers.map((player) => player.id)));
 
   const [question, setQuestion] = useState<QuestionStartPayload | null>(initialQuestion);
   const [locked, setLocked] = useState(initialLocked);
@@ -149,86 +151,63 @@ export function HostLobby({
   const remaining = locked ? (frozenRemaining ?? liveRemaining) : liveRemaining;
   const isLastQuestion = question !== null && question.questionIndex === questionCount - 1;
 
+  // Live roster straight off the session's `players` subcollection — the
+  // source of truth, so a late joiner appears without a replayed event and
+  // there's no client-side dedup to keep.
   useEffect(() => {
-    const client = createSessionRealtimeClient(pin, "host");
-    const channel = client.channels.get(`game:${pin}`);
+    return subscribeToRoster(sessionId, (roster) => {
+      setPlayers(roster);
+      setPlayerCount(roster.length);
+    });
+  }, [sessionId]);
 
-    const onPlayerJoined = (message: InboundMessage) => {
-      const data = message.data as { playerId: string; nickname: string; playerCount: number };
-      if (!seenPlayerIds.current.has(data.playerId)) {
-        seenPlayerIds.current.add(data.playerId);
-        setPlayers((prev) => [...prev, { id: data.playerId, nickname: data.nickname }]);
+  useEffect(() => {
+    return subscribeToSession(pin, initialBroadcastSeq, ({ name, data }) => {
+      switch (name) {
+        case SessionEvent.QuoteDisplay:
+          setActiveQuote(data as QuoteDisplayPayload);
+          break;
+        case SessionEvent.QuestionStart:
+          setQuestion(data as QuestionStartPayload);
+          setLocked(false);
+          setRevealedAnswers(null);
+          setFrozenRemaining(null);
+          setAnsweredCount(0);
+          setLeaderboard(null);
+          setAnswerBreakdown(null);
+          setActiveQuote(null);
+          break;
+        case SessionEvent.AnswerCountUpdate:
+          setAnsweredCount((data as AnswerCountUpdatePayload).answeredCount);
+          break;
+        case SessionEvent.QuestionLocked:
+          setLocked(true);
+          setFrozenRemaining(liveRemainingRef.current);
+          setRevealedAnswers((data as QuestionLockedPayload).correctChoices);
+          {
+            const jingle = questionRevealSoundRef.current;
+            if (jingle) {
+              jingle.currentTime = 0;
+              jingle.play().catch(() => {});
+            }
+          }
+          break;
+        case SessionEvent.LeaderboardUpdate:
+          setLeaderboard((data as LeaderboardUpdatePayload).leaderboard);
+          break;
+        case SessionEvent.Podium:
+          setPodium((data as PodiumPayload).podium);
+          break;
+        case SessionEvent.SettingsUpdate:
+          setShowLeaderboard((data as SettingsUpdatePayload).showLeaderboard);
+          setShowTimer((data as SettingsUpdatePayload).showTimer);
+          break;
+        case SessionEvent.AnswerBreakdown:
+          setAnswerBreakdown(data as AnswerBreakdownPayload);
+          break;
       }
-      setPlayerCount(data.playerCount);
-    };
-    const onQuestionStart = (message: InboundMessage) => {
-      const data = message.data as QuestionStartPayload;
-      setQuestion(data);
-      setLocked(false);
-      setRevealedAnswers(null);
-      setFrozenRemaining(null);
-      setAnsweredCount(0);
-      setLeaderboard(null);
-      setAnswerBreakdown(null);
-      setActiveQuote(null);
-    };
-    const onQuoteDisplay = (message: InboundMessage) => {
-      setActiveQuote(message.data as QuoteDisplayPayload);
-    };
-    const onAnswerCountUpdate = (message: InboundMessage) => {
-      const data = message.data as AnswerCountUpdatePayload;
-      setAnsweredCount(data.answeredCount);
-      setPlayerCount(data.playerCount);
-    };
-    const onQuestionLocked = (message: InboundMessage) => {
-      const data = message.data as QuestionLockedPayload;
-      setLocked(true);
-      setFrozenRemaining(liveRemainingRef.current);
-      setRevealedAnswers(data.correctChoices);
-      const jingle = questionRevealSoundRef.current;
-      if (jingle) {
-        jingle.currentTime = 0;
-        jingle.play().catch(() => {});
-      }
-    };
-    const onLeaderboardUpdate = (message: InboundMessage) => {
-      setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
-    };
-    const onPodium = (message: InboundMessage) => {
-      setPodium((message.data as PodiumPayload).podium);
-    };
-    const onSettingsUpdate = (message: InboundMessage) => {
-      const data = message.data as SettingsUpdatePayload;
-      setShowLeaderboard(data.showLeaderboard);
-      setShowTimer(data.showTimer);
-    };
-    const onAnswerBreakdown = (message: InboundMessage) => {
-      setAnswerBreakdown(message.data as AnswerBreakdownPayload);
-    };
-
-    channel.subscribe(SessionEvent.PlayerJoined, onPlayerJoined);
-    channel.subscribe(SessionEvent.QuoteDisplay, onQuoteDisplay);
-    channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
-    channel.subscribe(SessionEvent.AnswerCountUpdate, onAnswerCountUpdate);
-    channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
-    channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
-    channel.subscribe(SessionEvent.Podium, onPodium);
-    channel.subscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
-    channel.subscribe(SessionEvent.AnswerBreakdown, onAnswerBreakdown);
-
-    return () => {
-      channel.unsubscribe(SessionEvent.PlayerJoined, onPlayerJoined);
-      channel.unsubscribe(SessionEvent.QuoteDisplay, onQuoteDisplay);
-      channel.unsubscribe(SessionEvent.QuestionStart, onQuestionStart);
-      channel.unsubscribe(SessionEvent.AnswerCountUpdate, onAnswerCountUpdate);
-      channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
-      channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
-      channel.unsubscribe(SessionEvent.Podium, onPodium);
-      channel.unsubscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
-      channel.unsubscribe(SessionEvent.AnswerBreakdown, onAnswerBreakdown);
-      client.close();
-    };
-  }, [pin]);
+    });
+  }, [pin, initialBroadcastSeq]);
 
   // No auto-clear timer here — the quote stays up until the host clicks
   // "Next" (see handleNextQuote), which reveals the question and the
@@ -301,7 +280,7 @@ export function HostLobby({
         else setShowTimer(next);
       }
     } catch {
-      // Ably's SettingsUpdate broadcast is the fallback source of truth if this request fails.
+      // The settings_update broadcast is the fallback source of truth if this request fails.
     } finally {
       setIsTogglingSettings(false);
     }

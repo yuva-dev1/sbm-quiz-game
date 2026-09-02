@@ -2,16 +2,17 @@
 
 Simulates the plan's explicit worst case: 500-1000 players joining, then all
 answering within the last 1-2 seconds of a question. Targets our own HTTP
-API (join, answer) — not Ably's realtime transport, which is Ably's own
-infrastructure to scale, not ours.
+API (join, answer).
 
 `realtime-bot.mjs` is the exception: it's a *real player*, not an HTTP-only
-script. Each bot joins, opens a genuine `Ably.Realtime` connection, reports
-`estimatedLatencyMs` the same way the browser client does, and answers
-in-band off real `question_start`/`question_locked` events — see the header
-comment in that file for usage. Use it when you need to exercise the actual
-realtime path (connection counts, event fan-out latency), not just the HTTP
-endpoints.
+script. Each bot joins over the API, then opens a genuine Firestore listener
+on the session's broadcast event log — the same transport the browser client
+uses (`src/lib/sessionBroadcastClient.ts`). It reports, per question, the gap
+between `question_start` landing and that question's `optionsRevealedAt` (the
+lead-time reveal), which is the jitter budget latency-compensated scoring
+relies on. Use it to exercise the realtime path itself — listener fan-out and
+delivery timing — not just the HTTP endpoints. Needs the Firebase web config
+in the environment; see the file header.
 
 Needs [k6](https://k6.io) on PATH (or point at a portable binary — no admin
 install required, just download+unzip the release for your OS).

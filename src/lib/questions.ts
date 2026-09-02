@@ -1,7 +1,7 @@
 import { firestore } from "@/lib/firestore";
 import { FieldValue, Timestamp, type DocumentReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { redis } from "@/lib/redis";
-import { publishToSession } from "@/lib/ably";
+import { publishToSession } from "@/lib/sessionBroadcast";
 import { SessionEvent, type QuestionStartPayload } from "@/lib/events";
 import {
   computeCorrectFraction,
@@ -231,9 +231,11 @@ const ANSWER_COUNT_THROTTLE_MS = 300;
 /**
  * At most one answer_count_update broadcast per session every 300ms. Without
  * this, a burst of answers landing in the same second (everyone tapping just
- * before the deadline) publishes once per answer on one Ably channel, which
- * blows past Ably's per-channel publish-rate limit. A Redis NX lock makes
- * the throttle hold across Cloud Run instances, not just within one.
+ * before the deadline) publishes once per answer — each an
+ * append-to-the-event-log transaction contending on the same per-session
+ * `seq` counter doc, which serializes and blows past Firestore's ~1
+ * write/sec sustained per-document ceiling. A Redis NX lock makes the
+ * throttle hold across Cloud Run instances, not just within one.
  */
 async function shouldPublishAnswerCountUpdate(pin: string): Promise<boolean> {
   const key = `game:${pin}:answer-count-throttle`;

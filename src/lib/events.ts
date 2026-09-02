@@ -1,10 +1,13 @@
 /**
- * Event names published on a session's Ably channel (`game:{pin}`). Central
- * list so producers (API routes) and consumers (host/player UI) agree on
- * spelling; individual features add payload types as they land.
+ * Event names on a session's broadcast log (`sessionBroadcasts/{pin}/events`,
+ * see src/lib/sessionBroadcast.ts). Central list so producers (API routes)
+ * and consumers (host/player UI) agree on spelling; individual features add
+ * payload types as they land.
+ *
+ * Note there's no player_joined here — the host roster listens to the
+ * session's `players` subcollection directly (subscribeToRoster).
  */
 export const SessionEvent = {
-  PlayerJoined: "player_joined",
   GameStarted: "game_started",
   QuoteDisplay: "quote_display",
   QuestionStart: "question_start",

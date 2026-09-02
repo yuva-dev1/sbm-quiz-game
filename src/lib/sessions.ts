@@ -1,7 +1,7 @@
 import { firestore } from "@/lib/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { generateUniquePin } from "@/lib/pin";
-import { publishToSession } from "@/lib/ably";
+import { publishToSession, sessionBroadcastRef } from "@/lib/sessionBroadcast";
 import { SessionEvent, type SettingsUpdatePayload } from "@/lib/events";
 import { toPublicQuestion } from "@/lib/questions";
 import { finalizeSession } from "@/lib/leaderboard";
@@ -268,14 +268,18 @@ export class SessionNotCompletedError extends Error {
  * down a game still in progress ("Kill all live sessions" is the path for
  * that). recursiveDelete() removes the GameSession doc and every
  * subcollection under it (sessionQuestions, its nested answers, players,
- * results) in one call.
+ * results) in one call; the session's broadcast event log is a separate
+ * top-level tree (sessionBroadcasts/{pin}) so it's torn down alongside.
  */
 export async function deleteCompletedSession(sessionId: string): Promise<void> {
   const sessionRef = firestore.collection("gameSessions").doc(sessionId);
   const snap = await sessionRef.get();
   if (!snap.exists) throw new SessionHistoryNotFoundError(sessionId);
   if (snap.data()!.status !== "COMPLETED") throw new SessionNotCompletedError(sessionId);
-  await firestore.recursiveDelete(sessionRef);
+  await Promise.all([
+    firestore.recursiveDelete(sessionRef),
+    firestore.recursiveDelete(sessionBroadcastRef(snap.data()!.pin as string)),
+  ]);
 }
 
 /**

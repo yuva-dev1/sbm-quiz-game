@@ -1,11 +1,37 @@
 rules_version = '2';
 
-// All reads/writes happen server-side via the firebase-admin SDK (see
-// src/lib/firestore.ts), which bypasses these rules entirely — matching how
-// Prisma/Postgres access worked before this migration (server-only, no
-// client-side DB access). Deny-all is correct here, not a placeholder.
+// Almost everything is server-only: the firebase-admin SDK (see
+// src/lib/firestore.ts) bypasses these rules entirely, matching how
+// Prisma/Postgres access worked before this migration. The two exceptions
+// below are the live realtime path — the browser reads them directly with a
+// Firestore listener (src/lib/sessionBroadcastClient.ts), replacing the old
+// Ably subscription. Both hold only data that was already delivered to any
+// client holding the game PIN under Ably (sanitized event payloads; player
+// nicknames), so public read is not a widening of exposure. All writes stay
+// server-only (deny here; the Admin SDK ignores rules).
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Per-session broadcast event log — the question_start / question_locked
+    // / leaderboard_update / ... stream every player and the host tail.
+    match /sessionBroadcasts/{pin} {
+      allow read: if true;
+      allow write: if false;
+
+      match /events/{eventId} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
+
+    // The host lobby's live roster listens straight to this subcollection.
+    // Player docs carry nickname / estimatedLatencyMs / joinedAt — nothing
+    // that isn't already shown on screen to everyone in the room.
+    match /gameSessions/{sessionId}/players/{playerId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

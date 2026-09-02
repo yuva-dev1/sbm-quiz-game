@@ -6,8 +6,8 @@ import { NextRequest } from "next/server";
  * (Story 5.2), plus their running correct/answered count (shown regardless
  * of whether the leaderboard is toggled on). An HTTP response to the
  * requesting player's own call is as private as "sent privately to that
- * socket" needs to be here — no need for a dedicated per-player Ably channel
- * and the fan-out cost that'd add at scale (relevant for Feature 9's
+ * socket" needs to be here — no need for a dedicated per-player realtime
+ * channel and the fan-out cost that'd add at scale (relevant for Feature 9's
  * 500-1000 player load test).
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ pin: string }> }) {

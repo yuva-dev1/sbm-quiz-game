@@ -1,7 +1,7 @@
 import { redis } from "@/lib/redis";
 import { firestore } from "@/lib/firestore";
 import { FieldValue } from "firebase-admin/firestore";
-import { publishToSession } from "@/lib/ably";
+import { publishToSession } from "@/lib/sessionBroadcast";
 import { SessionEvent, type LeaderboardEntry as PublicLeaderboardEntry } from "@/lib/events";
 
 const TOP_N = 10;

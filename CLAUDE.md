@@ -50,9 +50,16 @@ before calling a change done.
 ## Architecture
 
 **Stack**: Next.js 16 App Router + TypeScript (breaking changes vs. training data — see
-`AGENTS.md`/`node_modules/next/dist/docs/`), Firebase Firestore (via `firebase-admin`, server-only —
-see `src/lib/firestore.ts`), Redis (live leaderboard via `ZINCRBY`/`ZREVRANGE`), Ably (realtime
-pub/sub per game PIN, channel `game:{pin}`), Vitest.
+`AGENTS.md`/`node_modules/next/dist/docs/`), Firebase Firestore (Admin SDK server-side via
+`firebase-admin`/`src/lib/firestore.ts`; browser Web SDK client-side for the realtime path only —
+`src/lib/firebaseClient.ts`), Redis (live leaderboard via `ZINCRBY`/`ZREVRANGE`), Vitest.
+
+**Realtime**: live-session events fan out through a per-session append-only log in Firestore
+(`sessionBroadcasts/{pin}/events`, written server-side by `src/lib/sessionBroadcast.ts`) that every
+client tails with a Firestore listener (`src/lib/sessionBroadcastClient.ts`). Replaced an Ably
+channel; `src/lib/events.ts` is still the transport-agnostic event-name/payload contract.
+`firestore.rules` grants the browser read on `sessionBroadcasts/**` and `gameSessions/{id}/players/**`
+(host roster listener) only — everything else stays server-only.
 
 **Layering**: `src/app/api/**/route.ts` handlers stay thin — parse/delegate/respond — with real
 logic living in `src/lib/*.ts`. Tests are colocated as `*.test.ts` next to the module they cover in

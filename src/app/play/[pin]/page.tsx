@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { PlayerLobby } from "./PlayerLobby";
 import { DynamicRejoinFromStorage as RejoinFromStorage } from "./DynamicRejoin";
 import { toPublicQuestion } from "@/lib/questions";
+import { sessionBroadcastRef } from "@/lib/sessionBroadcast";
 import type { LeaderboardEntry, QuestionStartPayload } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
@@ -43,9 +44,10 @@ export default async function PlayPage({
   const session = sessionSnap.data()!;
   if (session.pin !== pin) notFound();
 
-  const [questionsSnap, resultsSnap] = await Promise.all([
+  const [questionsSnap, resultsSnap, broadcastSnap] = await Promise.all([
     sessionRef.collection("sessionQuestions").orderBy("order").get(),
     sessionRef.collection("results").orderBy("rank", "asc").limit(3).get(),
+    sessionBroadcastRef(pin).get(),
   ]);
   const questions = questionsSnap.docs.map((doc) => {
     const data = doc.data();
@@ -101,6 +103,7 @@ export default async function PlayPage({
       pin={pin}
       playerId={playerId}
       nickname={nickname}
+      initialBroadcastSeq={(broadcastSnap.data()?.seq as number | undefined) ?? 0}
       questionCount={questions.length}
       initialGameStarted={session.status === "ACTIVE"}
       initialPodium={initialPodium}

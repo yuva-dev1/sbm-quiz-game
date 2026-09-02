@@ -11,7 +11,13 @@ deployment that weren't available while building.
 
 - [x] Full game flow start to finish, host + one player — verified
   repeatedly across Features 1-5 (session create → join → live questions →
-  scoring → leaderboard → podium), against real Ably/Postgres/Redis.
+  scoring → leaderboard → podium). Originally against Ably/Postgres/Redis;
+  the stack is now Firestore (data + realtime listener) + Redis.
+- [ ] **Needs a deployment**: re-verify that full flow against real Firestore
+  (not the emulator) after the Ably→Firestore realtime move — listener
+  delivery timing for `question_start` vs. the lead-time reveal, host roster
+  updates, reconnect resume via `initialBroadcastSeq`. See
+  `docs/firestore-migration.md` "Realtime" and `load-test/realtime-bot.mjs`.
 - [x] Player joins mid-question — lands waiting for the next question, not
   broken (Feature 2's fix; the plan's literal Story 2.1 wording would have
   rejected this, QA 9.1 explicitly expects it to work).
@@ -25,8 +31,8 @@ deployment that weren't available while building.
   (Feature 7.1, verified: 17s → 6s across a real reload).
 - [ ] **Needs a human**: same pass on an actual phone, on real wifi and
   real cellular. Everything above was verified in a desktop browser
-  automation tool — it exercises the same API and Ably wiring a phone
-  would, but touch interactions, mobile Safari/Chrome quirks, and real
+  automation tool — it exercises the same API and realtime-listener wiring a
+  phone would, but touch interactions, mobile Safari/Chrome quirks, and real
   network conditions are unverified.
 
 ## 9.2 — Multi-device pass (5-20 real people)

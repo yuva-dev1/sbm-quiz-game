@@ -43,7 +43,16 @@ const opt = (name, def = null) => {
 const doAnswer = args.includes("--answer");
 const durationSecs = Number(opt("--duration", 0));
 const label = opt("--label", "");
-const fireBefore = Number(opt("--fire-before", 1500));
+// When to fire each answer, relative to the question's optionsRevealedAt:
+//   --answer-at burst  (default) -> reveal + 3s ± 1s  — all answers clustered
+//        well inside the window, so they actually reach the submitAnswer
+//        transaction instead of being cheaply rejected by the deadline check
+//        (network latency under load can be >1s; firing near the deadline
+//        means most answers arrive expired and never exercise the write path)
+//   --answer-at deadline          -> deadline - random(0..1500ms)  — models
+//        the pathological "everyone taps at the last second" case, but only
+//        useful once you know the answer path holds under a clean burst
+const answerMode = opt("--answer-at", "burst");
 const tag = label ? `[${label}] ` : "";
 
 if (!pin || Number.isNaN(count)) {
@@ -80,11 +89,16 @@ const deliveryByQ = new Map(); // questionId -> { optionsRevealedAt, receiveGaps
 let lockEventsSeen = 0;
 let answerCountUpdates = 0;
 
-// ---- 1. join burst -------------------------------------------------------
-console.log(`${tag}joining ${count} players to ${pin} at ${baseUrl}…`);
+// ---- 1. join -----------------------------------------------------------
+// --ramp N spreads the joins evenly over N seconds (a realistic lobby fill,
+// where players trickle in as the host reads the PIN); default 0 = instant
+// burst (the pathological worst case, which also fights Cloud Run cold-start).
+const rampSecs = Number(opt("--ramp", 0));
+console.log(`${tag}joining ${count} players to ${pin} at ${baseUrl}${rampSecs ? ` over ${rampSecs}s` : " (instant burst)"}…`);
 const players = [];
 await Promise.all(
   Array.from({ length: count }, async (_, i) => {
+    if (rampSecs) await new Promise((r) => setTimeout(r, (i / count) * rampSecs * 1000));
     const t0 = now();
     try {
       const res = await fetch(`${baseUrl}/api/players`, {
@@ -147,8 +161,12 @@ function handleEvent(player, ev, seenSeq) {
     if (doAnswer && !player.answeredQ?.[q.questionId]) {
       player.answeredQ = player.answeredQ ?? {};
       player.answeredQ[q.questionId] = true;
-      const deadline = q.optionsRevealedAt + (q.timeLimitSecs ?? 20) * 1000;
-      const at = deadline - Math.random() * fireBefore;
+      const revealAt = q.optionsRevealedAt;
+      const deadline = revealAt + (q.timeLimitSecs ?? 20) * 1000;
+      const at =
+        answerMode === "deadline"
+          ? deadline - Math.random() * 1500
+          : revealAt + 3000 + (Math.random() - 0.5) * 2000; // burst: reveal +2..4s
       setTimeout(() => submitAnswer(player, q), Math.max(0, at - now()));
     }
   } else if (ev.name === "question_locked") {

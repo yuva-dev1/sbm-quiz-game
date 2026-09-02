@@ -1,7 +1,5 @@
 import { firestore } from "@/lib/firestore";
 import { FieldValue, type CollectionReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
-import { publishToSession } from "@/lib/ably";
-import { SessionEvent } from "@/lib/events";
 
 export class SessionNotJoinableError extends Error {
   constructor(pin: string) {
@@ -10,10 +8,12 @@ export class SessionNotJoinableError extends Error {
   }
 }
 
-// Ably's plan caps concurrent connections at 200 — every joined player holds
-// one for the life of the session. Capped a bit below that hard ceiling
-// (rather than exactly at it) to leave headroom for the host's own
-// connection and any in-flight reconnects.
+// The realtime transport no longer caps this (the old limit was Ably's
+// 200-concurrent-connection plan ceiling). What still bounds it is
+// submitAnswer's per-question transaction concurrency, verified safe at 190
+// concurrent submits in the migration plan's Phase 2 spike but not beyond —
+// so 190 stays until that's re-tested at higher load (see load-test/README.md
+// and docs/firestore-migration.md).
 export const MAX_PLAYERS_PER_SESSION = 190;
 
 export class SessionFullError extends Error {
@@ -49,9 +49,10 @@ async function uniqueNickname(playersRef: CollectionReference, requested: string
  * Joins a player to a session by PIN: any session that hasn't ended yet is
  * joinable, including one already in progress — a late joiner lands in a
  * waiting state until the next question (QA 9.1's mid-question join case),
- * rather than being rejected outright. Auto-suffixes colliding nicknames and
- * broadcasts player_joined so the host's live roster updates within ~1s
- * (Story 2.1).
+ * rather than being rejected outright. Auto-suffixes colliding nicknames.
+ * The host's live roster picks up the new player from a listener straight
+ * onto this `players` subcollection (see subscribeToRoster), so there's no
+ * player_joined event to publish here.
  */
 export async function joinSession(pin: string, requestedNickname: string) {
   const sessionDoc = await findJoinableSession(pin);
@@ -75,16 +76,7 @@ export async function joinSession(pin: string, requestedNickname: string) {
     joinedAt: FieldValue.serverTimestamp(),
   });
 
-  const playerCountSnap = await playersRef.count().get();
-  const playerCount = playerCountSnap.data().count;
-
   const session = sessionDoc.data();
-  await publishToSession(session.pin as string, SessionEvent.PlayerJoined, {
-    playerId: playerRef.id,
-    nickname,
-    playerCount,
-  });
-
   return {
     id: playerRef.id,
     gameSessionId: sessionDoc.id,

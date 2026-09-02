@@ -2,7 +2,7 @@
  * Full-screen interstitial shown before a question starts, carrying a Sri
  * Swamiji quote (src/lib/swamijiQuotes.ts) so players can connect with him
  * between questions rather than it just being a bare wait. Host and player
- * screens both render this off the same `quote_display` Ably broadcast, so
+ * screens both render this off the same `quote_display` broadcast, so
  * everyone sees the same quote at the same time. Stays up until the host
  * clicks "Next" — there's no auto-advance timer.
  */

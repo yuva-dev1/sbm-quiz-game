@@ -11,17 +11,18 @@ Built feature by feature, on stacked branches, against
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript) — host/player UI + API routes
-- **Firebase Firestore** (native mode, via `firebase-admin`, server-only) — quizzes, sessions,
-  players, answers, results. See `docs/firestore-migration.md` for the data-model design.
+- **Firebase Firestore** (native mode) — quizzes, sessions, players, answers, results, and the
+  live-session realtime event log. Server access is the Admin SDK (`firebase-admin`, server-only);
+  the browser uses the Firebase Web SDK for the realtime listener only. See
+  `docs/firestore-migration.md` for the data-model design and the Ably→Firestore realtime move.
 - **Redis** — live leaderboard (`ZINCRBY` / `ZREVRANGE`) during a session
-- **Ably** — realtime pub/sub per game PIN (`game:{pin}` channel)
 - **Vitest** — unit tests, especially the scoring formula
 
 ## Local development
 
-Requires Docker (for Redis), a JRE on PATH (for the Firestore emulator — e.g.
-`winget install EclipseAdoptium.Temurin.21.JRE` on Windows), and an
-[Ably](https://ably.com) API key (free tier is fine).
+Requires Docker (for Redis) and a JRE on PATH (for the Firestore emulator — e.g.
+`winget install EclipseAdoptium.Temurin.21.JRE` on Windows). No third-party realtime service —
+the emulator covers it; the browser client points at it via `NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST`.
 
 ```bash
 cp .env.example .env   # already done for local docker-compose/emulator defaults
@@ -92,16 +93,23 @@ passcode (`HOST_PASSCODE`).
 Config is entirely environment-based (see `.env.example`) — dev and prod
 never share credentials.
 
-1. **Firestore**: this app deploys onto the `bhagavatham-quiz-game` Firebase
-   project (native mode). No connection string to set — the Admin SDK picks
-   up Application Default Credentials from the deployment environment
+1. **Firestore**: this app deploys onto the `namabiksha-v1` Firebase project
+   (native mode). No connection string to set — the Admin SDK picks up
+   Application Default Credentials from the deployment environment
    automatically (Cloud Run's attached service account); `FIRESTORE_EMULATOR_HOST`
-   must be **unset** in prod so it doesn't try to talk to a local emulator.
-   Deploy security rules/indexes with `firebase deploy --only firestore`.
+   and `NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST` must be **unset** in prod.
+   Deploy security rules/indexes with `firebase deploy --only firestore`
+   (as `yuvadev1@godivinity.org` — see `CLAUDE.md`). One-time per project:
+   enable the TTL policy on the broadcast event log —
+   `gcloud firestore fields ttls update expireAt --collection-group=events --enable-ttl --project=namabiksha-v1`.
 2. **Redis**: any hosted Redis works (Upstash's free tier is enough for a
    single-class event). Set `REDIS_URL`.
-3. **Ably**: a **separate, real** API key from the dev one — set
-   `ABLY_API_KEY`.
+3. **Firebase web config** (client realtime listener): set
+   `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`,
+   `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_APP_ID` from the
+   Firebase console (Project settings → your apps → Web app). Not secrets, but
+   **build-time** — pass them as Cloud Run build env vars (they're inlined
+   into the client bundle; see `Dockerfile`), not just runtime.
 4. **`NEXT_PUBLIC_APP_URL`**: the real prod domain (used to build the
    join-link shown on the host screen).
 5. **`HOST_PASSCODE`**: a real passcode only hosts should know — do not reuse
@@ -122,11 +130,11 @@ never share credentials.
    any other secret for this.
 8. Deploy the Next.js app itself anywhere that supports it (Vercel is the
    path of least resistance for this stack — git push, no server to manage).
-   HTTPS/WSS is automatic on Vercel and most other platforms; Ably's client
-   SDK always negotiates a secure connection on its own regardless.
+   HTTPS is automatic on Vercel and most other platforms; the Firestore Web
+   SDK negotiates its own secure connection regardless.
 
-**Monitoring** (Story 8.2): `GET /api/health` checks Firestore and Redis live
-and Ably's config presence, returning 503 if anything's down. Point an
+**Monitoring** (Story 8.2): `GET /api/health` checks Firestore and Redis live,
+returning 503 if anything's down. Point an
 external uptime monitor at it (UptimeRobot's free tier is enough) so an
 outage mid-class is caught within seconds instead of being discovered from a
 confused host. A root error boundary (`src/app/error.tsx`) also logs

@@ -14,7 +14,7 @@ points = correct ? round(1000 * (1 - (trueReactionTime / timeLimit) / 2)) : 0
 ```
 
 Implementation: `src/lib/scoring.ts`. Deliberately pure functions with no
-I/O, so they can be tested in complete isolation from the DB/Ably/network.
+I/O, so they can be tested in complete isolation from the DB/realtime/network.
 
 ## Layer 1 — unit tests (`src/lib/scoring.test.ts`)
 
@@ -52,10 +52,13 @@ regardless of speed.
 
 ## What this doesn't cover yet
 
-Real-world network latency. Every case above ran over loopback or a single
-Ably connection in one process — `estimatedLatencyMs` was either set
-explicitly for the test or was a real but small (~10-15ms) local
-measurement. The formula's actual real-world fairness claim — that a
+Real-world network latency. Every case above ran over loopback in one
+process — `estimatedLatencyMs` was either set explicitly for the test or was
+a real but small (~10-15ms) local measurement. Note scoring never depends on
+realtime-transport delivery time anyway (reaction time is `serverReceivedAt`
+minus the server-set `optionsRevealedAt`); the transport only has to deliver
+`question_start` before the lead-time reveal, which the Firestore listener
+does well within the default 5s lead. The formula's actual real-world fairness claim — that a
 player in India isn't penalized relative to one in the US — can only be
 confirmed with real cross-region latency, which is QA 9.2's job, not this
 audit's.

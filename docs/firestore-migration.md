@@ -86,11 +86,46 @@ Quiz needs `firestore.recursiveDelete()` to also remove its `questions`/`respons
 subcollections. `GameSession`/`Player`/`Answer`/`SessionResult` are never deleted anywhere in the
 app, so no other cascade-delete handling was needed.
 
-## What's still Redis/Ably, unchanged
+## What's still Redis, unchanged
 
-The live leaderboard (`ZINCRBY`/`ZREVRANGE`) and realtime pub/sub (`game:{pin}` Ably channel) were
-explicitly out of scope for this migration and were not touched. `finalizeSession` still reads the
-full Redis leaderboard once and snapshots it into `results` docs — meaning a player who joined but
-never answered a single question never enters the Redis sorted set, and therefore never gets a
-`SessionResult` doc. This is original, pre-migration behavior, not something this migration
-changed.
+The live leaderboard (`ZINCRBY`/`ZREVRANGE`) was out of scope for this migration and was not
+touched. `finalizeSession` still reads the full Redis leaderboard once and snapshots it into
+`results` docs — meaning a player who joined but never answered a single question never enters the
+Redis sorted set, and therefore never gets a `SessionResult` doc. This is original, pre-migration
+behavior, not something this migration changed.
+
+## Realtime: Ably → Firestore listener (follow-up migration)
+
+The `game:{pin}` Ably channel was later replaced with a per-session append-only event log in
+Firestore, consolidating onto one backend and removing Ably's 200-concurrent-connection plan
+ceiling.
+
+- **Write side** (`src/lib/sessionBroadcast.ts`): `publishToSession(pin, name, data)` keeps its
+  signature and its never-throws contract. It now runs one transaction per event — bump a
+  per-session monotonic `seq` on `sessionBroadcasts/{pin}`, write the payload to
+  `sessionBroadcasts/{pin}/events/{seq}`. The log is host-paced (at most three events back-to-back,
+  at question-lock), so the single-doc `seq` counter never sees burst contention. `player_joined`
+  was removed from the log entirely — see below.
+- **Read side** (`src/lib/sessionBroadcastClient.ts`): browser `onSnapshot` on
+  `events where seq > sinceSeq`. `sinceSeq` is the counter value the server rendered into the page
+  (both `page.tsx` files read it and pass `initialBroadcastSeq`), so a mid-game mount or a
+  reconnect resumes with nothing lost (a wall-clock cutoff would drop events landing in the
+  hydration window) and nothing replayed against fresher SSR state.
+- **Host roster**: `subscribeToRoster` listens straight to `gameSessions/{id}/players` — the
+  source of truth — instead of a replayed `player_joined` stream. This also keeps the highest-fan-in
+  event (a join burst) off the `seq` counter doc.
+- **Rules**: `firestore.rules` grants public read on `sessionBroadcasts/**` and
+  `gameSessions/{id}/players/**` — both hold only data Ably already delivered to any PIN holder.
+  No Firebase Auth. All writes stay server-only.
+- **Cleanup**: `deleteCompletedSession` recursively deletes `sessionBroadcasts/{pin}` alongside the
+  session tree. Event docs also carry `expireAt` for a Firestore TTL policy as a backstop for
+  abandoned logs — set it once per environment:
+  ```bash
+  gcloud firestore fields ttls update expireAt \
+    --collection-group=events --enable-ttl --project=namabiksha-v1
+  ```
+
+**Known follow-up:** `MAX_PLAYERS_PER_SESSION` (190) is no longer bounded by the realtime transport
+— the only remaining constraint is `submitAnswer`'s per-question transaction concurrency, verified
+safe at 190 concurrent submits in the Phase 2 spike but not re-tested higher. Raising the cap needs
+that re-test first (see `load-test/README.md`).

@@ -7,9 +7,9 @@ import { redis } from "@/lib/redis";
  * noticed within seconds instead of from a confused host mid-class.
  *
  * Checks Firestore and Redis live, since either going down is the actual
- * "game just broke" scenario. Ably isn't checked live here — a config
- * check is enough, and it avoids putting an external API call on the
- * critical path of every uptime ping.
+ * "game just broke" scenario. The realtime transport is a Firestore
+ * listener now (no separate service to check) — the Firestore check below
+ * covers it.
  */
 export async function GET() {
   const checks: Record<string, string> = {};
@@ -32,9 +32,6 @@ export async function GET() {
     healthy = false;
     checks.redis = `error: ${error instanceof Error ? error.message : String(error)}`;
   }
-
-  checks.ablyConfigured = process.env.ABLY_API_KEY ? "ok" : "error: ABLY_API_KEY is not set";
-  if (!process.env.ABLY_API_KEY) healthy = false;
 
   return Response.json(
     { ok: healthy, checks, timestamp: new Date().toISOString() },

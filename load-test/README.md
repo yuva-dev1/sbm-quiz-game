@@ -4,15 +4,30 @@ Simulates the plan's explicit worst case: 500-1000 players joining, then all
 answering within the last 1-2 seconds of a question. Targets our own HTTP
 API (join, answer).
 
-`realtime-bot.mjs` is the exception: it's a *real player*, not an HTTP-only
-script. Each bot joins over the API, then opens a genuine Firestore listener
-on the session's broadcast event log — the same transport the browser client
-uses (`src/lib/sessionBroadcastClient.ts`). It reports, per question, the gap
-between `question_start` landing and that question's `optionsRevealedAt` (the
-lead-time reveal), which is the jitter budget latency-compensated scoring
-relies on. Use it to exercise the realtime path itself — listener fan-out and
-delivery timing — not just the HTTP endpoints. Needs the Firebase web config
-in the environment; see the file header.
+`simulate-players.mjs` is the all-in-one Node harness (no k6 needed): it runs
+the join burst, opens a real Firestore listener per virtual player, and — with
+`--answer` — fires each player's answer in the last ~1.5s before that
+question's deadline. It reports join latency, `question_start` delivery gap,
+and per-question answer status/latency (p50/p95/p99, plus 409 reasons). One
+process at full count is faithful for the join / answer / counter-contention
+path (independent HTTP requests); the Firestore SDK collapses identical
+listeners within one process, so for a true fan-out measurement run several
+copies in parallel (`--label a`, `--label b`, …), each with a smaller count.
+
+```bash
+# real capacity test — 500 in one session, answering
+node load-test/simulate-players.mjs <pin> 500 https://<host> --answer --duration 180
+
+# fan-out timing — 10 distinct listener clients
+for i in $(seq 1 10); do
+  node load-test/simulate-players.mjs <pin> 50 https://<host> --answer --label $i --duration 180 &
+done; wait
+```
+
+`realtime-bot.mjs` is the smaller, listener-only variant — each bot joins then
+tails the broadcast log, reporting the `question_start` → `optionsRevealedAt`
+gap (the jitter budget latency-compensated scoring relies on). Both need the
+Firebase web config in the environment; see the file headers.
 
 Needs [k6](https://k6.io) on PATH (or point at a portable binary — no admin
 install required, just download+unzip the release for your OS).

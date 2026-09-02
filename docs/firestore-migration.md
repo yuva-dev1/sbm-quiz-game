@@ -125,7 +125,9 @@ ceiling.
     --collection-group=events --enable-ttl --project=namabiksha-v1
   ```
 
-**Known follow-up:** `MAX_PLAYERS_PER_SESSION` (190) is no longer bounded by the realtime transport
-— the only remaining constraint is `submitAnswer`'s per-question transaction concurrency, verified
-safe at 190 concurrent submits in the Phase 2 spike but not re-tested higher. Raising the cap needs
-that re-test first (see `load-test/README.md`).
+**`MAX_PLAYERS_PER_SESSION`** was raised 190 → 1000 once realtime stopped being the bottleneck (190
+was Ably's plan ceiling). The only remaining constraint is `submitAnswer`'s per-question transaction
+concurrency — every answer increments counters on the one `sessionQuestions/{qid}` doc — which the
+Phase 2 spike proved only to 190, on the emulator. Validate against real Firestore with
+`load-test/` before trusting a full-size room; if counter contention degrades there, shard the
+per-question tally doc.

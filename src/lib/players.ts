@@ -8,13 +8,16 @@ export class SessionNotJoinableError extends Error {
   }
 }
 
-// The realtime transport no longer caps this (the old limit was Ably's
-// 200-concurrent-connection plan ceiling). What still bounds it is
-// submitAnswer's per-question transaction concurrency, verified safe at 190
-// concurrent submits in the migration plan's Phase 2 spike but not beyond —
-// so 190 stays until that's re-tested at higher load (see load-test/README.md
-// and docs/firestore-migration.md).
-export const MAX_PLAYERS_PER_SESSION = 190;
+// Raised from 190 (an Ably-plan artifact — the 200-concurrent-connection
+// ceiling) now that realtime is a Firestore listener with no connection cap.
+// 1000 matches the plan's stated worst case. The remaining real constraint
+// is submitAnswer's per-question transaction concurrency — every answer
+// increments counters on the one sessionQuestions/{qid} doc — so this number
+// is only as safe as the last load test against real Firestore backs up
+// (see load-test/README.md, docs/firestore-migration.md). A hard cap stays
+// rather than going unbounded: a runaway/abusive join loop shouldn't be able
+// to balloon a session (and its Firestore write cost) without limit.
+export const MAX_PLAYERS_PER_SESSION = 1000;
 
 export class SessionFullError extends Error {
   constructor(pin: string) {

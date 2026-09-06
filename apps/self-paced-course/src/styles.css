@@ -111,6 +111,9 @@ h1, h2, h3 { font-family: var(--serif); color: var(--brand-ink); line-height: 1.
 .auth-card h1 { font-size: 27px; margin-bottom: 6px; }
 .auth-card .sub { color: var(--ink-soft); font-size: 14px; margin: 0 0 22px; }
 .auth-card form { text-align: left; }
+/* First/last name share one row even inside the narrow auth card. */
+.auth-card .row { gap: 10px; }
+.auth-card .row .field { flex: 1 1 0; min-width: 0; }
 .auth-card .btn { width: 100%; justify-content: center; margin-top: 4px; }
 .auth-switch { margin-top: 16px; background: none; border: 0; color: var(--brand); font-weight: 600; font-size: 13px; cursor: pointer; }
 .auth-forgot { display: block; margin: -4px 0 12px auto; background: none; border: 0; color: var(--brand); font-weight: 600; font-size: 12px; cursor: pointer; }

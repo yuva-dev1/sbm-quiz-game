@@ -1,8 +1,9 @@
 /**
  * One-off seeder for the Weeks tab. Reads scripts/weeks-seed.json and calls
  * the deployed Apps Script `upsertWeek` action for each week (idempotent — a
- * re-run updates the existing rows, never duplicates). Quizzes are left empty
- * and weeks stay DRAFT; the host generates + publishes each quiz.
+ * re-run updates title/summary/lessons on existing rows, never duplicates,
+ * and never touches Status/ResponsesOpen). Quizzes are left empty; the host
+ * builds + opens each one.
  *
  * Usage:
  *   SELF_PACED_SHEETS_ENDPOINT='{"url":"https://script.google.com/.../exec","apiKey":"..."}' \
@@ -51,4 +52,4 @@ for (const week of weeks) {
   if (!result.ok) process.exitCode = 1;
 }
 
-console.log('Done. Weeks are DRAFT — publish each from /host once its quiz is ready.');
+console.log('Done. Status/ResponsesOpen were left as-is; build + open each quiz from /host.');

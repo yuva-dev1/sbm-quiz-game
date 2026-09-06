@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, LoaderCircle } from 'lucide-react';
 import Layout from '../Layout.jsx';
 import { api } from '../api.js';
 import { LessonVideo } from '../video.jsx';
@@ -58,6 +58,13 @@ export default function WeekPage() {
         <section className="lesson" key={i}>
           {lesson.title && <h3>{lesson.title}</h3>}
           <LessonVideo url={lesson.videoUrl} title={lesson.title} />
+          {lesson.pageUrl && (
+            <p style={{ marginTop: 8, fontSize: 13 }}>
+              <a href={lesson.pageUrl} target="_blank" rel="noopener noreferrer">
+                Video not playing? Watch this lesson on the course site <ExternalLink size={13} style={{ verticalAlign: '-2px' }} />
+              </a>
+            </p>
+          )}
           {lesson.description && <p className="muted" style={{ marginTop: 8 }}>{lesson.description}</p>}
         </section>
       ))}

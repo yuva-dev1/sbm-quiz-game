@@ -68,7 +68,9 @@ export default function CourseHome() {
       )}
 
       {state.weeks.map((week) => {
-        const w = WINDOW_LABEL[week.windowState] || WINDOW_LABEL.closed_by_host;
+        const w = week.questionCount === 0
+          ? { text: 'Lesson only', cls: 'closed' }
+          : WINDOW_LABEL[week.windowState] || WINDOW_LABEL.closed_by_host;
         const best = state.bestByWeek[week.weekNumber];
         return (
           <Link className="card week-card" to={`/week/${week.weekNumber}`} key={week.weekNumber}>

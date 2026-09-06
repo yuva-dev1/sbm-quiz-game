@@ -65,16 +65,18 @@ export default function WeekPage() {
       <div className="card" style={{ marginTop: 24 }}>
         <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22 }}>Week {week.weekNumber} quiz</h3>
         <p className="muted" style={{ margin: '6px 0 14px' }}>
-          {week.questions.length} question{week.questions.length === 1 ? '' : 's'}.
-          {state.best != null && ` Your best so far: ${state.best}%.`}
-          {week.windowState !== 'open' && ' This quiz is currently closed.'}
+          {week.questions.length === 0
+            ? 'The quiz for this week is not available yet.'
+            : `${week.questions.length} question${week.questions.length === 1 ? '' : 's'}.`}
+          {week.questions.length > 0 && state.best != null && ` Your best so far: ${state.best}%.`}
+          {week.questions.length > 0 && week.windowState !== 'open' && ' This quiz is currently closed.'}
         </p>
         {canTake ? (
           <Link className="btn" to={`/week/${week.weekNumber}/quiz`}>
             {state.best == null ? 'Take the quiz' : 'Retake the quiz'} <ArrowRight size={16} />
           </Link>
         ) : (
-          <button className="btn" disabled>Quiz unavailable</button>
+          <button className="btn" disabled>{week.questions.length === 0 ? 'Coming soon' : 'Quiz unavailable'}</button>
         )}
       </div>
     </Layout>

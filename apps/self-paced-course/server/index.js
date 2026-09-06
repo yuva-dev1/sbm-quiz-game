@@ -458,11 +458,18 @@ async function setStatus(req, res, patch) {
   }
 }
 
+// Publish makes the week + its lessons visible to students. It does NOT open
+// the quiz — the host flips that separately (below) once the quiz is ready.
 app.post('/api/host/weeks/:n/publish', requireHost(SESSION_SECRET), (req, res) =>
-  setStatus(req, res, { status: 'PUBLISHED', responsesOpen: true })
+  setStatus(req, res, { status: 'PUBLISHED' })
 );
+// Unpublish hides the whole week again.
 app.post('/api/host/weeks/:n/unpublish', requireHost(SESSION_SECRET), (req, res) =>
   setStatus(req, res, { status: 'DRAFT', responsesOpen: false })
+);
+// Open / close the quiz on an already-published week without unpublishing it.
+app.post('/api/host/weeks/:n/responses', requireHost(SESSION_SECRET), (req, res) =>
+  setStatus(req, res, { responsesOpen: req.body?.open === true })
 );
 
 // ------------------------------------------------------------------ Host: scores

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LoaderCircle, Plus } from 'lucide-react';
+import { LoaderCircle, Lock, LockOpen, Plus } from 'lucide-react';
 import Layout from '../Layout.jsx';
 import { api } from '../api.js';
 
@@ -18,10 +18,10 @@ export default function HostWeeks() {
 
   useEffect(load, [load]);
 
-  const toggle = async (week) => {
-    setBusy(week.weekNumber);
+  const act = async (weekNumber, path, body) => {
+    setBusy(weekNumber);
     try {
-      await api.post(`/api/host/weeks/${week.weekNumber}/${week.status === 'PUBLISHED' ? 'unpublish' : 'publish'}`);
+      await api.post(`/api/host/weeks/${weekNumber}/${path}`, body);
       load();
     } catch (error) {
       setState((s) => ({ ...s, error: error.message }));
@@ -49,24 +49,56 @@ export default function HostWeeks() {
         <p className="muted" style={{ marginTop: 16 }}>No weeks yet. Create the first one.</p>
       )}
 
-      {state.weeks.map((week) => (
-        <div className="card" key={week.weekNumber} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ flex: '1 1 240px' }}>
-            <span className="kicker">Week {week.weekNumber} · {week.status}</span>
-            <h2 style={{ fontSize: 22 }}>{week.title}</h2>
-            <div className="meta">
-              <span>{week.lessons.length} lesson{week.lessons.length === 1 ? '' : 's'}</span>
-              <span>{week.quiz.length} question{week.quiz.length === 1 ? '' : 's'}</span>
-              <span className={`pill ${week.responsesOpen ? 'open' : 'closed'}`}>{week.responsesOpen ? 'Accepting responses' : 'Closed'}</span>
+      {state.weeks.map((week) => {
+        const published = week.status === 'PUBLISHED';
+        const hasQuiz = week.quiz.length > 0;
+        const spinning = busy === week.weekNumber;
+
+        let statusPill;
+        if (!published) statusPill = { cls: 'closed', text: 'Draft' };
+        else if (!hasQuiz) statusPill = { cls: 'closed', text: 'Lesson only' };
+        else if (week.responsesOpen) statusPill = { cls: 'open', text: 'Quiz open' };
+        else statusPill = { cls: 'closed', text: 'Quiz closed' };
+
+        return (
+          <div className="card" key={week.weekNumber} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 240px' }}>
+              <span className="kicker">Week {week.weekNumber}</span>
+              <h2 style={{ fontSize: 22 }}>{week.title}</h2>
+              <div className="meta">
+                <span>{week.lessons.length} lesson{week.lessons.length === 1 ? '' : 's'}</span>
+                <span>{week.quiz.length} question{week.quiz.length === 1 ? '' : 's'}</span>
+                <span className={`pill ${statusPill.cls}`}>{statusPill.text}</span>
+              </div>
             </div>
+
+            <Link className="btn secondary small" to={`/host/week/${week.weekNumber}`}>Edit</Link>
+
+            {published && (
+              <button
+                className="btn small"
+                type="button"
+                onClick={() => act(week.weekNumber, 'responses', { open: !week.responsesOpen })}
+                disabled={spinning || !hasQuiz}
+                title={hasQuiz ? '' : 'Add a quiz first'}
+              >
+                {spinning ? <LoaderCircle className="spin" size={14} /> : week.responsesOpen ? <Lock size={14} /> : <LockOpen size={14} />}
+                {week.responsesOpen ? 'Close quiz' : 'Open quiz'}
+              </button>
+            )}
+
+            <button
+              className="btn ghost small"
+              type="button"
+              onClick={() => act(week.weekNumber, published ? 'unpublish' : 'publish')}
+              disabled={spinning}
+            >
+              {spinning ? <LoaderCircle className="spin" size={14} /> : null}
+              {published ? 'Unpublish' : 'Publish'}
+            </button>
           </div>
-          <Link className="btn secondary small" to={`/host/week/${week.weekNumber}`}>Edit</Link>
-          <button className="btn small" type="button" onClick={() => toggle(week)} disabled={busy === week.weekNumber || (week.status !== 'PUBLISHED' && week.quiz.length === 0)}>
-            {busy === week.weekNumber ? <LoaderCircle className="spin" size={14} /> : null}
-            {week.status === 'PUBLISHED' ? 'Unpublish' : 'Publish'}
-          </button>
-        </div>
-      ))}
+        );
+      })}
     </Layout>
   );
 }

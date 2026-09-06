@@ -344,25 +344,17 @@ export function HostLobby({
     </button>
   );
 
-  // Available on every host screen — pin-sharing, mid-question, and podium —
-  // fixed in a corner so it never fights each screen's own centered layout.
-  // z-[60] beats QuoteOverlay's z-50 so it stays reachable even while a quote
-  // is covering the rest of the screen between questions.
-  const soundSettingsMenu = (
-    <div className="fixed top-4 right-4 z-[60]">
-      <SoundSettingsMenu />
-    </div>
-  );
-
   if (podium) {
     return (
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center lg:max-w-2xl xl:max-w-3xl">
-        {soundSettingsMenu}
         <Confetti />
         {activeQuote && (
           <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onNext={handleNextQuote} />
         )}
-        <span className="pill-badge">{quizTitle}</span>
+        <div className="flex items-center justify-center gap-3">
+          <span className="pill-badge">{quizTitle}</span>
+          <SoundSettingsMenu />
+        </div>
         {showLeaderboard ? (
           <>
             <h1 className="text-5xl">Final Results</h1>
@@ -402,7 +394,6 @@ export function HostLobby({
   if (started && question) {
     return (
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center lg:max-w-5xl xl:max-w-6xl">
-        {soundSettingsMenu}
         {activeQuote && (
           <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onNext={handleNextQuote} />
         )}
@@ -429,6 +420,7 @@ export function HostLobby({
               />
               Timer
             </label>
+            <SoundSettingsMenu />
           </div>
         </div>
         <h1 className="max-w-2xl text-4xl break-words lg:max-w-4xl">{question.question}</h1>
@@ -565,10 +557,12 @@ export function HostLobby({
 
   return (
     <div className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-8 px-6 py-16 text-center lg:max-w-4xl xl:max-w-5xl">
-      {soundSettingsMenu}
       {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
       <div>
-        <span className="pill-badge">{quizTitle}</span>
+        <div className="flex items-center justify-center gap-3">
+          <span className="pill-badge">{quizTitle}</span>
+          <SoundSettingsMenu />
+        </div>
         <p className="mt-3 text-sm text-ink-soft">Join at {joinUrl}</p>
       </div>
       <p className="font-serif text-8xl font-bold tracking-widest text-brand">{pin}</p>

@@ -1,0 +1,207 @@
+{
+  "weeks": [
+    {
+      "id": "week-1",
+      "label": "Week 1",
+      "topics": [
+        "Meaning and Etymology of Sanatana Dharma",
+        "Origin of the Term Hinduism",
+        "How Sanatana Dharma Differs from Other Religions",
+        "The Vedas as the Supreme Pramana",
+        "The Four Vedas - Rig, Yajur, Sama, Atharva",
+        "The Four Portions of the Vedas",
+        "The Two Itihasas - Ramayana and Mahabharata",
+        "The 18 Puranas and Their Three Gunas",
+        "The Pramana Hierarchy - Vedas, Itihasas, Puranas"
+      ],
+      "source_documents": [
+        {
+          "id": "week-1-eng-sb-course",
+          "name": "Week 1-ENG-SB Course.pdf",
+          "topics_from_headings": [
+            "Sanatana Dharma",
+            "Our Grand Shastras - Overview",
+            "Place of Itihasas & Puranas in Shastras"
+          ]
+        },
+        {
+          "id": "week1-infographic",
+          "name": "week1-infographic.jpg",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-2",
+      "label": "Week 2",
+      "topics": [
+        "The Prasthana Traya",
+        "Pillar 1 - The Upanishads and the Dasopanishads",
+        "Pillar 2 - Srimad Bhagavad Gita",
+        "Pillar 3 - The Brahma Sutras",
+        "Srimad Bhagavatam as the Essence of the Upanishads",
+        "Srimad Bhagavatam as the Essence of the Bhagavad Gita",
+        "Srimad Bhagavatam as the Essence of the Brahma Sutras",
+        "Srimad Bhagavatam Is Bhagavan Himself"
+      ],
+      "source_documents": [
+        {
+          "id": "sbcc-e-2-notes-pdf",
+          "name": "SBCC E 2 Notes PDF.pdf",
+          "topics_from_headings": [
+            "Srimad Bhagavatam Is the Essence of all Scriptures",
+            "Srimad Bhagavatam Is Bhagavan Himself"
+          ]
+        },
+        {
+          "id": "week2-infographic",
+          "name": "week2-infographic.jpg",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-3",
+      "label": "Week 3",
+      "topics": [
+        "The Three Levels of a Purana Story - Dharma, Tattva, Rasa",
+        "The Four Major Puranas on Srimad Bhagavatam's Greatness",
+        "Srimad Bhagavatam as the Essence of Other Scriptures by Canto",
+        "The Parikshith and Nectar Episode",
+        "The Brahmaji and the Measuring Episode",
+        "Narada's Encounter with Bhakti Devi",
+        "The Prescription of the Srimad Bhagavata Saptaha",
+        "The Atma Deva and Dhundhukari Story"
+      ],
+      "source_documents": [
+        {
+          "id": "week-3-eng-sb-course-2-with-3-stories",
+          "name": "Week 3-ENG-SB Course 2 - With 3 Stories.pdf",
+          "topics_from_headings": [
+            "Being a Rasika",
+            "Srimad Bhagavata Mahatmyam",
+            "Four Stories to the Fore"
+          ]
+        },
+        {
+          "id": "week3-infographic",
+          "name": "week3-infographic.jpg",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-4",
+      "label": "Week 4",
+      "topics": [
+        "The Story of Atmadeva",
+        "The Effects of Srimad Bhagavatam (Mahatmyam)",
+        "The First Lineage of Transmission",
+        "The Second Lineage of Transmission",
+        "Structure of Srimad Bhagavatam",
+        "Speakers and Listeners of Srimad Bhagavatam"
+      ],
+      "source_documents": [
+        {
+          "id": "sb-week4-infographics",
+          "name": "SB Week4-Infographics.jpeg",
+          "topics_from_headings": []
+        },
+        {
+          "id": "week-4-eng-sb-course-2-pdf",
+          "name": "Week 4-ENG-SB Course 2 PDF.pdf",
+          "topics_from_headings": [
+            "Story of Atmadeva",
+            "Lineage of Srimad Bhagavatam",
+            "Structure of Srimad Bhagavatam"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "week-5",
+      "label": "Week 5",
+      "topics": [
+        "The Three Types of Samhitas",
+        "The Five Classical Lakshanas of a Purana",
+        "Srimad Bhagavatam as a Maha-Purana with Ten Lakshanas",
+        "The Twelve Cantos and Their Dominant Lakshanas",
+        "Canto 1 as the Adhikari Skandha",
+        "Outline of Canto 1",
+        "Highlights of Canto 1 - Stutis and Pralapas",
+        "The Six Questions of Shaunaka Rishi"
+      ],
+      "source_documents": [
+        {
+          "id": "sbcc-e-5-notes-pdf",
+          "name": "SBCC E 5 Notes PDF.pdf",
+          "topics_from_headings": [
+            "Deeper Dive Into Puranas",
+            "Srimad Bhagavatam Is A Mahapurana",
+            "Canto 1 - Part 1"
+          ]
+        },
+        {
+          "id": "week5-infographics",
+          "name": "Week5-Infographics.jpeg",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-6",
+      "label": "Week 6",
+      "topics": [
+        "Suta Pauranika on True Dharma and Devotion",
+        "Shaunaka Rishi's Four Further Questions",
+        "Sage Vyasa's Birth and Restlessness",
+        "Sage Narada's Arrival and Advice to Vyasa",
+        "Narada's Previous Birth - Sadhus and Chaturmasya",
+        "Narada's Previous Birth - Vision, Divine Voice, and Rebirth",
+        "Sage Vyasa's Samadhi Vision and Composing Srimad Bhagavatam"
+      ],
+      "source_documents": [
+        {
+          "id": "sbcc-e-6-notes-pdf",
+          "name": "SBCC E 6 Notes PDF.pdf",
+          "topics_from_headings": [
+            "Canto 1 Answers",
+            "Sage Narada & Sage Veda Vyasa’s Conversation"
+          ]
+        },
+        {
+          "id": "week-6-infographic",
+          "name": "Week 6 infographic.pdf",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-7",
+      "label": "Week 7",
+      "topics": [
+        "Ashwatthama's Revenge and Arjuna Sparing His Life",
+        "Kunti's Stuti After Krishna Protects the Unborn Parikshith",
+        "Bhishmacharya's Final Teachings and Bhishma Stuti",
+        "Parikshith's Birth, Horoscope, and Naming",
+        "Dhritarashtra, Gandhari, and Vidura's Departure to Saptasrota",
+        "Arjuna's Realization and the End of the Pandava Generation",
+        "Parikshith's Vision of Dharma as a Bull and Mother Earth as a Cow",
+        "The Four Legs of Dharma: Tapas, Shaucham, Daya, Satyam",
+        "Parikshith Sparing Kali Purusha and the Five Places of Kali"
+      ],
+      "source_documents": [
+        {
+          "id": "sbcc-e-7-notes-pdf",
+          "name": "SBCC E 7 Notes PDF.pdf",
+          "topics_from_headings": []
+        },
+        {
+          "id": "wk7-infographics",
+          "name": "Wk7 Infographics.jpeg",
+          "topics_from_headings": []
+        }
+      ]
+    }
+  ]
+}

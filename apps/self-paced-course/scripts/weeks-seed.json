@@ -1,12 +1,12 @@
 {
-  "_note": "Seed content for the Weeks tab, scraped from srimadbhagavatamcourse.org/english-6month-selfpaced on 2026-09-06. Lesson videos are the Vimeo embeds used on that page. Quizzes are left empty — the host generates and publishes each week's quiz. Weeks seed as DRAFT.",
+  "_note": "Seed content for the Weeks tab, scraped from srimadbhagavatamcourse.org/english-6month-selfpaced on 2026-09-06. Lesson videos are the Vimeo embeds used on that page; pageUrl is the lesson's page on the course site (fallback link for students when the Vimeo embed is blocked). Quizzes are left empty — the host generates and publishes each week's quiz.",
   "weeks": [
     {
       "weekNumber": 1,
       "title": "Sanatana Dharma, Our Grand Shastras, Place of Puranas",
       "summary": "Sanatana Dharma & the Shastras",
       "lessons": [
-        { "title": "Sanatana Dharma, Our Grand Shastras, Place of Puranas", "description": "", "videoUrl": "https://vimeo.com/1224289323" }
+        { "title": "Sanatana Dharma, Our Grand Shastras, Place of Puranas", "description": "", "videoUrl": "https://vimeo.com/1224289323", "pageUrl": "https://www.srimadbhagavatamcourse.org/english-6month-selfpaced/week1lesson1" }
       ]
     },
     {
@@ -14,7 +14,7 @@
       "title": "Srimad Bhagavatham - Essence of All Scriptures",
       "summary": "The Glory of the Bhagavatam",
       "lessons": [
-        { "title": "Srimad Bhagavatham - Essence of All Scriptures", "description": "", "videoUrl": "https://vimeo.com/1224293522" }
+        { "title": "Srimad Bhagavatham - Essence of All Scriptures", "description": "", "videoUrl": "https://vimeo.com/1224293522", "pageUrl": "https://www.srimadbhagavatamcourse.org/english-6month-selfpaced/week2lesson1" }
       ]
     },
     {
@@ -22,7 +22,7 @@
       "title": "Srimad Bhagavata Mahatmyam",
       "summary": "Four Stories of the Mahatmyam",
       "lessons": [
-        { "title": "Srimad Bhagavata Mahatmyam", "description": "", "videoUrl": "https://vimeo.com/1224294079" }
+        { "title": "Srimad Bhagavata Mahatmyam", "description": "", "videoUrl": "https://vimeo.com/1224294079", "pageUrl": "https://www.srimadbhagavatamcourse.org/english-6month-selfpaced/srimad-bhagavata-mahatmyam" }
       ]
     },
     {
@@ -30,7 +30,7 @@
       "title": "Srimad Bhagavata Mahatmyam (Atmadeva Charitram), SB Lineage, SB Structure",
       "summary": "Atmadeva and the Lineage",
       "lessons": [
-        { "title": "Srimad Bhagavata Mahatmyam (Atmadeva Charitram), SB Lineage, SB Structure", "description": "", "videoUrl": "https://vimeo.com/1224293858" }
+        { "title": "Srimad Bhagavata Mahatmyam (Atmadeva Charitram), SB Lineage, SB Structure", "description": "", "videoUrl": "https://vimeo.com/1224293858", "pageUrl": "https://www.srimadbhagavatamcourse.org/english-6month-selfpaced/srimad-bhagavata-mahatmyam-atmadeva-charitram-sb-lineage-sb-structure" }
       ]
     },
     {
@@ -38,7 +38,7 @@
       "title": "Purana Lakshanas, Canto 1 Introduction & Overview, Six Questions of Shaunaka Rishis in Chapter 1",
       "summary": "Canto One Begins",
       "lessons": [
-        { "title": "Purana Lakshanas, Canto 1 Introduction & Overview, Six Questions of Shaunaka Rishis in Chapter 1", "description": "", "videoUrl": "https://vimeo.com/1224293738" }
+        { "title": "Purana Lakshanas, Canto 1 Introduction & Overview, Six Questions of Shaunaka Rishis in Chapter 1", "description": "", "videoUrl": "https://vimeo.com/1224293738", "pageUrl": "https://www.srimadbhagavatamcourse.org/english-6month-selfpaced/purana-lakshanas-canto-1-introduction-overview-six-questions-of-shaunaka-rishis-in-chapter-1" }
       ]
     },
     {
@@ -46,7 +46,7 @@
       "title": "Canto 1 Answers & Sage Narada-Sage Vyasa Conversation",
       "summary": "Narada's Counsel & Vyasa's Composition",
       "lessons": [
-        { "title": "Canto 1 Answers & Sage Narada-Sage Vyasa Conversation", "description": "", "videoUrl": "https://vimeo.com/1224293524" }
+        { "title": "Canto 1 Answers & Sage Narada-Sage Vyasa Conversation", "description": "", "videoUrl": "https://vimeo.com/1224293524", "pageUrl": "https://www.srimadbhagavatamcourse.org/english-6month-selfpaced/canto-1-answers-sage-naradasage-vyasa-conversation" }
       ]
     },
     {
@@ -54,7 +54,7 @@
       "title": "The Great lineage of King Parikshith",
       "summary": "Parikshit's Birth & Dharma Restored",
       "lessons": [
-        { "title": "The Great lineage of King Parikshith", "description": "", "videoUrl": "https://vimeo.com/1224293525" }
+        { "title": "The Great lineage of King Parikshith", "description": "", "videoUrl": "https://vimeo.com/1224293525", "pageUrl": "https://www.srimadbhagavatamcourse.org/english-6month-selfpaced/the-great-lineage-of-king-parikshith" }
       ]
     },
     {
@@ -62,7 +62,7 @@
       "title": "Canto 1, Chapters 18-19: King Parikshith's curse & Sri Shuka arrives, Canto 2: Sri Shuka's Answers & the Unique Greatness of Hari-Bhakti",
       "summary": "Parikshit's Curse & Sri Shuka's Answers",
       "lessons": [
-        { "title": "Canto 1, Chapters 18-19: King Parikshith's curse & Sri Shuka arrives, Canto 2: Sri Shuka's Answers & the Unique Greatness of Hari-Bhakti", "description": "", "videoUrl": "https://vimeo.com/1224293526" }
+        { "title": "Canto 1, Chapters 18-19: King Parikshith's curse & Sri Shuka arrives, Canto 2: Sri Shuka's Answers & the Unique Greatness of Hari-Bhakti", "description": "", "videoUrl": "https://vimeo.com/1224293526", "pageUrl": "https://www.srimadbhagavatamcourse.org/english-6month-selfpaced/canto-1-chapters-1819-king-parikshiths-curse-sri-shuka-arrives-canto-2-sri-shukas-answers-the-unique-greatness-of-haribhakti" }
       ]
     }
   ]

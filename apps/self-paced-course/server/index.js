@@ -402,9 +402,12 @@ app.post('/api/host/weeks/:n', requireHost(SESSION_SECRET), async (req, res) => 
         .map((lesson) => ({
           title: String(lesson?.title || '').trim(),
           description: String(lesson?.description || '').trim(),
-          videoUrl: String(lesson?.videoUrl || '').trim()
+          videoUrl: String(lesson?.videoUrl || '').trim(),
+          // Optional link to the lesson's page on the course site, shown to
+          // students as a fallback when the video embed is blocked.
+          pageUrl: String(lesson?.pageUrl || '').trim()
         }))
-        .filter((lesson) => lesson.title || lesson.videoUrl)
+        .filter((lesson) => lesson.title || lesson.videoUrl || lesson.pageUrl)
     : [];
 
   const quiz = Array.isArray(body.quiz)

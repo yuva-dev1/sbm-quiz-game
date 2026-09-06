@@ -4,11 +4,12 @@ import { ArrowLeft, LoaderCircle, Plus, Sparkles, Trash2 } from 'lucide-react';
 import Layout from '../Layout.jsx';
 import { api } from '../api.js';
 import { generateWithProgress } from '../generateClient.js';
+import { LessonVideo } from '../video.jsx';
 
 const DIFFICULTY_MAP = { Mixed: 'mixed', Foundations: 'beginner', Discussion: 'intermediate', Challenge: 'advanced' };
 const COUNTS = [5, 8, 10, 15, 20, 25, 30, 35];
 
-const blankLesson = () => ({ title: '', description: '', videoUrl: '' });
+const blankLesson = () => ({ title: '', description: '', videoUrl: '', pageUrl: '' });
 const blankQuestion = () => ({
   id: crypto.randomUUID(),
   type: 'MULTIPLE_CHOICE',
@@ -124,7 +125,7 @@ export default function HostWeekEditor() {
       await api.post(`/api/host/weeks/${weekNumber}`, {
         title: title.trim(),
         summary: summary.trim(),
-        lessons: lessons.filter((l) => l.title || l.videoUrl),
+        lessons: lessons.filter((l) => l.title || l.videoUrl || l.pageUrl),
         quiz: questions,
         opensAt: opensAt ? new Date(opensAt).toISOString() : null,
         closesAt: closesAt ? new Date(closesAt).toISOString() : null
@@ -182,6 +183,16 @@ export default function HostWeekEditor() {
           <label className="field">
             <span>Video URL</span>
             <input value={lesson.videoUrl} onChange={(e) => updateItem(setLessons, i, { videoUrl: e.target.value })} placeholder="YouTube, Vimeo, or a direct video link" />
+          </label>
+          {lesson.videoUrl && (
+            <div className="field">
+              <span>Preview — this is exactly what students see</span>
+              <LessonVideo url={lesson.videoUrl} title={lesson.title} />
+            </div>
+          )}
+          <label className="field">
+            <span>Course-site page URL (optional)</span>
+            <input value={lesson.pageUrl} onChange={(e) => updateItem(setLessons, i, { pageUrl: e.target.value })} placeholder="https://www.srimadbhagavatamcourse.org/... — shown to students as a fallback if the embed is blocked" />
           </label>
           <label className="field">
             <span>Description (optional)</span>

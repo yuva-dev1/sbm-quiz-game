@@ -8,6 +8,8 @@ import { COURSE_TITLE, OFFICIAL_GOD_LOGO_URL } from './brandAssets.js';
 const MIN_PASSWORD_LENGTH = 8;
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
+const MAX_NAME_LENGTH = 80;
+
 const COPY = {
   login: { heading: 'Welcome back', sub: 'Log in with your email and password.' },
   register: { heading: 'Create your account', sub: 'Your name, email, and a password to get started.' },
@@ -26,7 +28,8 @@ export default function AuthGate({ initialView = 'login' }) {
   }, []);
 
   const [view, setView] = useState(resetParams.token ? 'reset' : initialView);
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState(resetParams.token ? resetParams.email : '');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -57,8 +60,12 @@ export default function AuthGate({ initialView = 'login' }) {
       setError('Enter a valid email address.');
       return;
     }
-    if (view === 'register' && !name.trim()) {
-      setError('Please enter your name.');
+    if (view === 'register' && (!firstName.trim() || !lastName.trim())) {
+      setError('Please enter your first and last name.');
+      return;
+    }
+    if (view === 'register' && (firstName.trim().length > MAX_NAME_LENGTH || lastName.trim().length > MAX_NAME_LENGTH)) {
+      setError('That name is too long.');
       return;
     }
     if ((view === 'register' || view === 'reset') && password.length < MIN_PASSWORD_LENGTH) {
@@ -80,7 +87,12 @@ export default function AuthGate({ initialView = 'login' }) {
       }
 
       if (view === 'register') {
-        await api.post('/api/auth/register', { name: name.trim(), email: normalizedEmail, password });
+        await api.post('/api/auth/register', {
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: normalizedEmail,
+          password
+        });
       } else if (view === 'reset') {
         await api.post('/api/auth/reset', { email: resetParams.email || normalizedEmail, token: resetParams.token, password });
       } else {
@@ -95,7 +107,7 @@ export default function AuthGate({ initialView = 'login' }) {
     }
   };
 
-  const showName = view === 'register';
+  const showNames = view === 'register';
   const showEmail = view !== 'reset';
   const showPassword = view === 'login' || view === 'register' || view === 'reset';
   const showConfirm = view === 'register' || view === 'reset';
@@ -112,11 +124,17 @@ export default function AuthGate({ initialView = 'login' }) {
         <p className="sub">{COPY[view].sub}</p>
 
         <form onSubmit={submit}>
-          {showName && (
-            <label className="field">
-              <span>Name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Your full name" required />
-            </label>
+          {showNames && (
+            <div className="row">
+              <label className="field">
+                <span>First name</span>
+                <input value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" maxLength={MAX_NAME_LENGTH} required />
+              </label>
+              <label className="field">
+                <span>Last name</span>
+                <input value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" maxLength={MAX_NAME_LENGTH} required />
+              </label>
+            </div>
           )}
           {showEmail && (
             <label className="field">

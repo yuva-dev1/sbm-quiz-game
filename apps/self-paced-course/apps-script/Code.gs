@@ -31,7 +31,11 @@
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-const USERS_HEADERS = ['Name', 'Email', 'PasswordHash', 'CreatedAt', 'ResetTokenHash', 'ResetTokenExpiresAt'];
+// `Name` stays as the combined "First Last" for the welcome email, the
+// Attempts denorm, and the host scores grid; FirstName/LastName are the
+// separately-captured fields. Adding a column requires the Users tab to be
+// recreated (getOrCreateSheet only writes headers on first creation).
+const USERS_HEADERS = ['FirstName', 'LastName', 'Name', 'Email', 'PasswordHash', 'CreatedAt', 'ResetTokenHash', 'ResetTokenExpiresAt'];
 const WEEKS_HEADERS = ['WeekNumber', 'Title', 'Summary', 'Status', 'LessonsJSON', 'QuizJSON', 'ResponsesOpen', 'OpensAt', 'ClosesAt', 'UpdatedAt'];
 const ATTEMPTS_HEADERS = ['AttemptId', 'Email', 'Name', 'WeekNumber', 'SubmittedAt', 'CorrectCount', 'TotalQuestions', 'Percentage', 'AnswersJSON'];
 
@@ -115,10 +119,12 @@ function normEmail(value) {
 }
 
 function handleRegister(body) {
-  var name = String(body.name || '').trim();
+  var firstName = String(body.firstName || '').trim();
+  var lastName = String(body.lastName || '').trim();
+  var name = (firstName + ' ' + lastName).trim();
   var email = normEmail(body.email);
   var passwordHash = String(body.passwordHash || '');
-  if (!name) return jsonResponse({ ok: false, error: 'A name is required.' });
+  if (!firstName || !lastName) return jsonResponse({ ok: false, error: 'First and last name are required.' });
   if (!EMAIL_PATTERN.test(email)) return jsonResponse({ ok: false, error: 'A valid email address is required.' });
   if (!passwordHash) return jsonResponse({ ok: false, error: 'Missing passwordHash.' });
 
@@ -130,6 +136,8 @@ function handleRegister(body) {
       return jsonResponse({ ok: false, error: 'An account with this email address already exists.' });
     }
     var row = [];
+    row[usersCol('FirstName') - 1] = firstName;
+    row[usersCol('LastName') - 1] = lastName;
     row[usersCol('Name') - 1] = name;
     row[usersCol('Email') - 1] = email;
     row[usersCol('PasswordHash') - 1] = passwordHash;

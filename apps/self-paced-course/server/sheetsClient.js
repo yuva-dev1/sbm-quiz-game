@@ -36,8 +36,8 @@ async function callSheetsScript(body) {
 
 // ---- Accounts ----
 
-export async function createAccount(name, email, passwordHash) {
-  return callSheetsScript({ action: 'register', name, email, passwordHash });
+export async function createAccount(firstName, lastName, email, passwordHash) {
+  return callSheetsScript({ action: 'register', firstName, lastName, email, passwordHash });
 }
 
 export async function findAccount(email) {

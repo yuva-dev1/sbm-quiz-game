@@ -45,7 +45,7 @@ const UPSTREAM_QUIZ_URL =
   'https://sbm-quiz-game-876193044983.us-central1.run.app/generate-quiz';
 
 const MIN_PASSWORD_LENGTH = 8;
-const MAX_NAME_LENGTH = 120;
+const MAX_NAME_LENGTH = 80;
 const BCRYPT_ROUNDS = 12;
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // Per-email cooldown on password-reset requests. Best-effort/in-memory — one
@@ -92,17 +92,20 @@ function hydrateWeek(row) {
 // ------------------------------------------------------------------ Student auth
 
 app.post('/api/auth/register', async (req, res) => {
-  const name = String(req.body?.name || '').trim();
+  const firstName = String(req.body?.firstName || '').trim();
+  const lastName = String(req.body?.lastName || '').trim();
   const email = normalizeEmail(req.body?.email);
   const password = String(req.body?.password || '');
+  const name = `${firstName} ${lastName}`.trim();
 
-  if (!name || name.length > MAX_NAME_LENGTH) return badRequest(res, 'Please enter your name.');
+  if (!firstName || !lastName) return badRequest(res, 'Please enter your first and last name.');
+  if (firstName.length > MAX_NAME_LENGTH || lastName.length > MAX_NAME_LENGTH) return badRequest(res, 'That name is too long.');
   if (!EMAIL_PATTERN.test(email) || email.length > 254) return badRequest(res, 'Enter a valid email address.');
   if (password.length < MIN_PASSWORD_LENGTH) return badRequest(res, `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
 
   try {
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const result = await createAccount(name, email, passwordHash);
+    const result = await createAccount(firstName, lastName, email, passwordHash);
     if (!result.ok) {
       res.status(409).json({ error: result.error || 'An account with this email already exists.' });
       return;

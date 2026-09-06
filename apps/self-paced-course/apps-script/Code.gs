@@ -2,14 +2,19 @@
  * Google Apps Script web app backing the Srimad Bhagavatam Self-Paced Course
  * sheet (Users / Weeks / Attempts tabs).
  *
- * Deploy: Extensions > Apps Script (bound to the target Sheet), paste this in,
- * run authorize() once from the editor to grant the mail + external-request
+ * Standalone project (not bound to the Sheet) — it opens the Sheet by id from
+ * the SHEET_ID script property, so the script's lifecycle is independent of
+ * the spreadsheet.
+ *
+ * Deploy: script.google.com > New project, paste this in, set the script
+ * properties below, run authorize() once to grant the mail + external-request
  * scopes, then Deploy > New deployment > Web app ("Execute as: Me",
  * "Who has access: Anyone"). Copy the /exec URL. On later edits use
- * Deploy > Manage deployments > edit > Version: New version so the URL is
- * kept stable.
+ * Deploy > Manage deployments > edit > Version: New version so the URL is kept
+ * stable.
  *
  * Script Properties (Project Settings > Script Properties):
+ *   SHEET_ID      — id of the target Google Sheet (from its URL). Required.
  *   API_KEY       — shared secret, matches SELF_PACED_SHEETS_ENDPOINT.apiKey.
  *   APP_URL       — public URL of the self-paced course app, used to build
  *                   password-reset links, e.g. https://<subdomain>
@@ -35,9 +40,13 @@ const BRAND_INK = '#20255D';
 const BRAND_GOLD = '#99610B';
 const DEFAULT_LOGO_URL = 'https://godivinity.org/wp-content/uploads/2018/05/GOD-LOGO-1024x617.jpg';
 
-/** Run once from the editor after pasting, to surface the OAuth consent for
- *  the MailApp (send email) and UrlFetchApp (fetch logo) scopes. */
+/** Run once from the editor after pasting + setting SHEET_ID, to surface the
+ *  OAuth consent for the Spreadsheet, MailApp (send email) and UrlFetchApp
+ *  (fetch logo) scopes. Also creates the three tabs up front. */
 function authorize() {
+  getOrCreateSheet('Users', USERS_HEADERS);
+  getOrCreateSheet('Weeks', WEEKS_HEADERS);
+  getOrCreateSheet('Attempts', ATTEMPTS_HEADERS);
   MailApp.getRemainingDailyQuota();
   UrlFetchApp.fetch(DEFAULT_LOGO_URL, { muteHttpExceptions: true });
 }
@@ -516,8 +525,14 @@ function sha256Hex(str) {
   return bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
 }
 
+function targetSpreadsheet_() {
+  var id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (!id) throw new Error('SHEET_ID script property is not set.');
+  return SpreadsheetApp.openById(id);
+}
+
 function getOrCreateSheet(name, headers) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = targetSpreadsheet_();
   var sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);

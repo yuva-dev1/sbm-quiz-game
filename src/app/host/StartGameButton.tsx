@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { startLobbyMusic, stopLobbyMusic } from "@/lib/lobbyMusic";
+import { SoundSettingsMenu } from "@/components/SoundSettingsMenu";
 
 export function StartGameButton({ quizId }: { quizId: string }) {
   const router = useRouter();
@@ -36,9 +37,12 @@ export function StartGameButton({ quizId }: { quizId: string }) {
 
   return (
     <div className="flex flex-shrink-0 flex-col items-end gap-1">
-      <button type="button" onClick={handleClick} disabled={isStarting} className="btn btn-primary">
-        {isStarting ? "Starting…" : "Start Live Game"}
-      </button>
+      <div className="flex items-center gap-2">
+        <SoundSettingsMenu />
+        <button type="button" onClick={handleClick} disabled={isStarting} className="btn btn-primary">
+          {isStarting ? "Starting…" : "Start Live Game"}
+        </button>
+      </div>
       {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );

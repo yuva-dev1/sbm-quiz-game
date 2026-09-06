@@ -23,6 +23,8 @@
  * productive. If it's not working, open DevTools' Console tab and send the
  * `[lobbyMusic]` lines.
  */
+import { isSoundEnabled } from "./soundSettings";
+
 const BASE_VOLUME = 0.5;
 const FADE_OUT_MS = 1000;
 const FADE_STEPS = 20;
@@ -43,6 +45,7 @@ function createAudio(): HTMLAudioElement {
 }
 
 export function startLobbyMusic() {
+  if (!isSoundEnabled("mangalacharan")) return;
   if (!audio) {
     audio = createAudio();
   }
@@ -88,6 +91,7 @@ export function stopLobbyMusic() {
  * /host/[pin] without having gone through the button above (e.g. a page
  * reload), so the synchronous-gesture play() above never happened. */
 export function retryLobbyMusicIfPaused() {
+  if (!isSoundEnabled("mangalacharan")) return;
   if (audio?.paused) {
     console.info("[lobbyMusic] retrying on gesture");
     audio.play().catch((err) => console.warn("[lobbyMusic] retry play() rejected:", err?.name, err?.message));

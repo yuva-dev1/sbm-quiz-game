@@ -4,6 +4,7 @@ import { QuizDraftCard } from "./QuizDraftCard";
 import { PublishedQuizCard } from "./PublishedQuizCard";
 import { getCourseCatalog, toPublicCourseWeeks } from "@/lib/courseCatalog";
 import { logoutHostAction } from "./login/actions";
+import { SoundSettingsMenu } from "@/components/SoundSettingsMenu";
 
 export const dynamic = "force-dynamic";
 
@@ -86,11 +87,14 @@ export default async function HostPage() {
           <h1 className="mt-3 text-4xl">Pick a quiz</h1>
           <p className="mt-2 text-ink-soft">Generate a new quiz, or start a live session from an existing one.</p>
         </div>
-        <form action={logoutHostAction}>
-          <button type="submit" className="text-sm font-semibold text-ink-soft underline">
-            Log out
-          </button>
-        </form>
+        <div className="flex flex-shrink-0 flex-col items-end gap-3">
+          <SoundSettingsMenu />
+          <form action={logoutHostAction}>
+            <button type="submit" className="text-sm font-semibold text-ink-soft underline">
+              Log out
+            </button>
+          </form>
+        </div>
       </div>
 
       <GenerateQuizForm weeks={toPublicCourseWeeks(catalog)} />

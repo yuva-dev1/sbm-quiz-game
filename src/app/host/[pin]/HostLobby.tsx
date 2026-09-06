@@ -18,8 +18,11 @@ import {
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_TILE_COLORS } from "@/lib/answerShapes";
 import { retryLobbyMusicIfPaused, startLobbyMusic, stopLobbyMusic } from "@/lib/lobbyMusic";
+import { startQuestionMusic, stopQuestionMusic } from "@/lib/questionMusic";
+import { isSoundEnabled, useSoundSettings } from "@/lib/soundSettings";
 import { QuoteOverlay } from "@/components/QuoteOverlay";
 import { Confetti } from "@/components/Confetti";
+import { SoundSettingsMenu } from "@/components/SoundSettingsMenu";
 
 type Player = { id: string; nickname: string };
 
@@ -86,6 +89,9 @@ export function HostLobby({
   const questionRevealSoundRef = useRef<HTMLAudioElement | null>(null);
   const resultsFanfareRef = useRef<HTMLAudioElement | null>(null);
   const hasPlayedResultsFanfare = useRef(false);
+  const sound = useSoundSettings();
+  const mangalacharanOn = !sound.muteAll && sound.enabled.mangalacharan;
+  const questionMusicOn = !sound.muteAll && sound.enabled.questionMusic;
 
   useEffect(() => {
     questionRevealSoundRef.current = new Audio("/audio/question-reveal.mp3");
@@ -100,7 +106,7 @@ export function HostLobby({
   // starting it on the host's next tap/key press as a fallback for the case
   // where the host landed here without that click (e.g. a page reload).
   useEffect(() => {
-    if (started) {
+    if (started || !mangalacharanOn) {
       stopLobbyMusic();
       return;
     }
@@ -115,7 +121,7 @@ export function HostLobby({
       document.removeEventListener("keydown", retryOnGesture);
       stopLobbyMusic();
     };
-  }, [started]);
+  }, [started, mangalacharanOn]);
 
   // Browsers reject play() without a prior user gesture on the page — caught
   // and ignored everywhere below since a missed sound effect isn't worth
@@ -123,7 +129,9 @@ export function HostLobby({
   useEffect(() => {
     if (!podium || hasPlayedResultsFanfare.current) return;
     hasPlayedResultsFanfare.current = true;
-    resultsFanfareRef.current?.play().catch(() => {});
+    if (isSoundEnabled("quizEnd")) {
+      resultsFanfareRef.current?.play().catch(() => {});
+    }
   }, [podium]);
 
   // Lead-time countdown: seconds until answer choices reveal. Reuses
@@ -135,6 +143,19 @@ export function HostLobby({
       : 0;
   const leadRemaining = useCountdown(question?.startedAt ?? null, leadDurationSecs);
   const optionsVisible = question !== null && leadRemaining <= 0;
+
+  // Faint background loop for the room while a question is actually live —
+  // choices shown, answers open — so it's not dead silent while everyone
+  // thinks. Stops the instant the question locks, a new question's "Get
+  // Ready" countdown starts, or results are revealed early via End Game.
+  useEffect(() => {
+    if (optionsVisible && !locked && !podium && questionMusicOn) {
+      startQuestionMusic();
+    } else {
+      stopQuestionMusic();
+    }
+    return () => stopQuestionMusic();
+  }, [optionsVisible, locked, podium, questionMusicOn]);
 
   const liveRemaining = useCountdown(question?.optionsRevealedAt ?? null, question?.timeLimitSecs ?? 0);
   // Frozen the instant the question locks (captured in the onQuestionLocked
@@ -186,7 +207,7 @@ export function HostLobby({
           setRevealedAnswers((data as QuestionLockedPayload).correctChoices);
           {
             const jingle = questionRevealSoundRef.current;
-            if (jingle) {
+            if (jingle && isSoundEnabled("answerReveal")) {
               jingle.currentTime = 0;
               jingle.play().catch(() => {});
             }
@@ -323,9 +344,20 @@ export function HostLobby({
     </button>
   );
 
+  // Available on every host screen — pin-sharing, mid-question, and podium —
+  // fixed in a corner so it never fights each screen's own centered layout.
+  // z-[60] beats QuoteOverlay's z-50 so it stays reachable even while a quote
+  // is covering the rest of the screen between questions.
+  const soundSettingsMenu = (
+    <div className="fixed top-4 right-4 z-[60]">
+      <SoundSettingsMenu />
+    </div>
+  );
+
   if (podium) {
     return (
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center lg:max-w-2xl xl:max-w-3xl">
+        {soundSettingsMenu}
         <Confetti />
         {activeQuote && (
           <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onNext={handleNextQuote} />
@@ -370,6 +402,7 @@ export function HostLobby({
   if (started && question) {
     return (
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center lg:max-w-5xl xl:max-w-6xl">
+        {soundSettingsMenu}
         {activeQuote && (
           <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onNext={handleNextQuote} />
         )}
@@ -532,6 +565,7 @@ export function HostLobby({
 
   return (
     <div className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-8 px-6 py-16 text-center lg:max-w-4xl xl:max-w-5xl">
+      {soundSettingsMenu}
       {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
       <div>
         <span className="pill-badge">{quizTitle}</span>

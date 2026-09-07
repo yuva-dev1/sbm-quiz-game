@@ -79,4 +79,15 @@ describe('listAttemptsNewestFirst', () => {
     expect(out[0].percentage).toBe(80);
     expect(out[0].weekNumber).toBe(2);
   });
+
+  it('carries quizVersion when present, null when blank or missing', () => {
+    const [withV, blankV, noV] = listAttemptsNewestFirst([
+      attempt({ id: 'a', submittedAt: '2026-09-03T00:00:00Z', quizVersion: '3' }),
+      attempt({ id: 'b', submittedAt: '2026-09-02T00:00:00Z', quizVersion: '' }),
+      attempt({ id: 'c', submittedAt: '2026-09-01T00:00:00Z' })
+    ]);
+    expect(withV.quizVersion).toBe(3);
+    expect(blankV.quizVersion).toBeNull();
+    expect(noV.quizVersion).toBeNull();
+  });
 });

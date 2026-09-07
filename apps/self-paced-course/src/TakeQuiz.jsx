@@ -35,6 +35,7 @@ export default function TakeQuiz() {
   const sid = params.get('sid') || '';
   const backHref = courseHomeUrl(params.get('back') || '');
   const preview = params.get('preview') === '1';
+  const previewVersion = preview ? params.get('v') || '' : '';
 
   const [state, setState] = useState({ loading: true, error: '', data: null });
   const [selected, setSelected] = useState({});
@@ -45,12 +46,13 @@ export default function TakeQuiz() {
 
   const load = useCallback(() => {
     setState({ loading: true, error: '', data: null });
-    const q = preview ? 'preview=1' : `sid=${encodeURIComponent(sid)}`;
+    let q = preview ? 'preview=1' : `sid=${encodeURIComponent(sid)}`;
+    if (previewVersion) q += `&v=${encodeURIComponent(previewVersion)}`;
     api
       .get(`/api/q/${n}?${q}`)
       .then((data) => setState({ loading: false, error: '', data }))
       .catch((error) => setState({ loading: false, error: error.message, data: null }));
-  }, [n, sid, preview]);
+  }, [n, sid, preview, previewVersion]);
 
   useEffect(load, [load]);
 
@@ -98,7 +100,8 @@ export default function TakeQuiz() {
     );
   }
 
-  const { firstName, bestPercentage, lastPercentage, attemptCount, week } = state.data;
+  const { firstName, bestPercentage, lastPercentage, attemptCount, version, liveVersion, week } = state.data;
+  const viewingOldVersion = preview && version != null && liveVersion != null && version !== liveVersion;
 
   const submit = async () => {
     const unanswered = week.questions.filter((q) => !(selected[q.id]?.length)).length;
@@ -131,6 +134,11 @@ export default function TakeQuiz() {
       {preview && (
         <p className="info" style={{ marginBottom: 12 }}>
           Host preview — this is exactly what a student sees. Nothing is saved.
+          {version != null && (
+            viewingOldVersion
+              ? ` Showing version ${version} (not live — live is v${liveVersion}).`
+              : ` Showing the live quiz (version ${version}).`
+          )}
         </p>
       )}
       <p className="eyebrow">Week {week.weekNumber} quiz{firstName ? ` · ${firstName}` : ''}</p>

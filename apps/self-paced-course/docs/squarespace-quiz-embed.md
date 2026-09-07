@@ -13,9 +13,9 @@ the attempt in the Sheet. No second sign-in.
 3. Add a **Code Block** and paste [`squarespace-quiz-embed-snippet.html`](./squarespace-quiz-embed-snippet.html).
 4. At the top of the snippet set:
    - `WEEK` — the week number (`1`, `2`, …).
-   - `COURSE_APP` — the quiz app basethe  URL
+   - `COURSE_APP` — the quiz app base URL
      (`https://quiz.srimadbhagavatamcourse.org`, or the
-     `bhagavatham-self-paced-course-…run.app`the  URL until DNS is live).
+     `bhagavatham-self-paced-course-…run.app` URL until DNS is live).
 
 The snippet renders the quiz in an auto-resizing iframe and shows a friendly
 message if the visitor isn't signed in.

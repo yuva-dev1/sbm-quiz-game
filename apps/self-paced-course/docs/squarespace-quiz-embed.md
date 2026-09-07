@@ -13,9 +13,9 @@ the attempt in the Sheet. No second sign-in.
 3. Add a **Code Block** and paste [`squarespace-quiz-embed-snippet.html`](./squarespace-quiz-embed-snippet.html).
 4. At the top of the snippet set:
    - `WEEK` — the week number (`1`, `2`, …).
-   - `COURSE_APP` — the quiz app base URL
-     (`https://self-paced.srimadbhagavatamcourse.org`, or the
-     `bhagavatham-self-paced-course-…run.app` URL until DNS is live).
+   - `COURSE_APP` — the quiz app basethe  URL
+     (`https://quiz.srimadbhagavatamcourse.org`, or the
+     `bhagavatham-self-paced-course-…run.app`the  URL until DNS is live).
 
 The snippet renders the quiz in an auto-resizing iframe and shows a friendly
 message if the visitor isn't signed in.
@@ -23,7 +23,7 @@ message if the visitor isn't signed in.
 ## How identity flows
 
 - `SiteUserInfo` cookie → `{ siteUserId, firstName, authenticated }` (client-side).
-- iframe src: `COURSE_APP/q/<WEEK>?sid=<siteUserId>&back=<this lesson's URL>`.
+- iframe src: `COURSE_APP/q/<WEEK>?sid=<siteUserId>&back=<this lesson'sthe  URL>`.
 - App server: `GET /api/q/:n` → `resolveMember(sid)` → Members sheet, else
   `GET https://api.squarespace.com/1.0/profiles/<sid>` (needs `SQUARESPACE_API_KEY`
   with Profiles read scope) → caches `{ email, firstName, lastName }`.

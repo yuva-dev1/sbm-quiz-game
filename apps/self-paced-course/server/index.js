@@ -62,6 +62,17 @@ if (!HOST_PASSCODE) console.warn('HOST_PASSCODE is not set — the host area wil
 if (!process.env.SELF_PACED_SHEETS_ENDPOINT) console.warn('SELF_PACED_SHEETS_ENDPOINT is not set — accounts, weeks, and scores will fail.');
 if (!GENERATE_QUIZ_API_KEY) console.warn('GENERATE_QUIZ_API_KEY is not set — quiz generation will fail.');
 
+// Origins allowed to POST to /api/public/* from a browser (e.g. a sign-up
+// form embedded on the Squarespace site). Comma-separated override; the
+// default is the course's own domain, www + apex.
+const PUBLIC_CORS_ORIGINS = (
+  process.env.PUBLIC_CORS_ORIGINS ||
+  'https://www.srimadbhagavatamcourse.org,https://srimadbhagavatamcourse.org'
+)
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 const app = express();
 app.use(express.json({ limit: '512kb' }));
 
@@ -71,6 +82,47 @@ function normalizeEmail(value) {
 
 function badRequest(res, message) {
   res.status(400).json({ error: message });
+}
+
+/** CORS + preflight for the public sign-up endpoint. */
+function publicCors(req, res, next) {
+  const origin = req.headers.origin;
+  if (origin && PUBLIC_CORS_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+}
+
+/**
+ * Validate + hash + write a new account to the Users sheet. Shared by the
+ * app's own /api/auth/register and the public /api/public/register.
+ * Returns { status, body, email?, name? } — never throws for expected
+ * validation / duplicate cases; throws only on a sheet/transport failure.
+ */
+async function registerAccount(input) {
+  const firstName = String(input?.firstName || '').trim();
+  const lastName = String(input?.lastName || '').trim();
+  const email = normalizeEmail(input?.email);
+  const password = String(input?.password || '');
+  const name = `${firstName} ${lastName}`.trim();
+
+  if (!firstName || !lastName) return { status: 400, body: { error: 'Please enter your first and last name.' } };
+  if (firstName.length > MAX_NAME_LENGTH || lastName.length > MAX_NAME_LENGTH) return { status: 400, body: { error: 'That name is too long.' } };
+  if (!EMAIL_PATTERN.test(email) || email.length > 254) return { status: 400, body: { error: 'Enter a valid email address.' } };
+  if (password.length < MIN_PASSWORD_LENGTH) return { status: 400, body: { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` } };
+
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  const result = await createAccount(firstName, lastName, email, passwordHash);
+  if (!result.ok) return { status: 409, body: { error: result.error || 'An account with this email already exists.' } };
+  return { status: 201, body: { ok: true }, email, name };
 }
 
 /** Sheet week row -> in-memory week with Date fields and parsed JSON. */
@@ -92,29 +144,33 @@ function hydrateWeek(row) {
 // ------------------------------------------------------------------ Student auth
 
 app.post('/api/auth/register', async (req, res) => {
-  const firstName = String(req.body?.firstName || '').trim();
-  const lastName = String(req.body?.lastName || '').trim();
-  const email = normalizeEmail(req.body?.email);
-  const password = String(req.body?.password || '');
-  const name = `${firstName} ${lastName}`.trim();
-
-  if (!firstName || !lastName) return badRequest(res, 'Please enter your first and last name.');
-  if (firstName.length > MAX_NAME_LENGTH || lastName.length > MAX_NAME_LENGTH) return badRequest(res, 'That name is too long.');
-  if (!EMAIL_PATTERN.test(email) || email.length > 254) return badRequest(res, 'Enter a valid email address.');
-  if (password.length < MIN_PASSWORD_LENGTH) return badRequest(res, `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-
   try {
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const result = await createAccount(firstName, lastName, email, passwordHash);
-    if (!result.ok) {
-      res.status(409).json({ error: result.error || 'An account with this email already exists.' });
+    const r = await registerAccount(req.body || {});
+    if (r.status !== 201) {
+      res.status(r.status).json(r.body);
       return;
     }
-    res.setHeader('Set-Cookie', createStudentCookie(email, SESSION_SECRET));
-    res.status(201).json({ email, name });
+    res.setHeader('Set-Cookie', createStudentCookie(r.email, SESSION_SECRET));
+    res.status(201).json({ email: r.email, name: r.name });
   } catch (error) {
     console.error('register error:', error);
     res.status(502).json({ error: 'Could not reach the course sheet. Please try again.' });
+  }
+});
+
+// Cross-origin sign-up for a form embedded on the Squarespace site. Same
+// validation + bcrypt + Users-sheet write as /api/auth/register, but no
+// session cookie (it's a cross-site call). The Apps Script still sends the
+// welcome email. The person then logs into this app with the same
+// email + password.
+app.options('/api/public/register', publicCors);
+app.post('/api/public/register', publicCors, async (req, res) => {
+  try {
+    const r = await registerAccount(req.body || {});
+    res.status(r.status).json(r.status === 201 ? { ok: true } : r.body);
+  } catch (error) {
+    console.error('public register error:', error);
+    res.status(502).json({ error: 'Could not create your account right now. Please try again.' });
   }
 });
 

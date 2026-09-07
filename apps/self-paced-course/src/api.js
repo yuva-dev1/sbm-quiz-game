@@ -1,10 +1,12 @@
 /** Thin fetch wrappers. Every response is JSON `{ ... }` or `{ error }`. */
 
 async function request(method, url, body) {
+  // POSTs always carry a JSON body (even {}), so Google Front End never
+  // 411s a bodyless request before it reaches the app.
   const response = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined
+    headers: method === 'GET' ? undefined : { 'Content-Type': 'application/json' },
+    body: method === 'GET' ? undefined : JSON.stringify(body ?? {})
   });
   if (response.status === 204) return {};
   const payload = await response.json().catch(() => ({}));

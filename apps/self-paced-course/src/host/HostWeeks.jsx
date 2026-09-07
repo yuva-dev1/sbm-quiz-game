@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LoaderCircle, Lock, LockOpen, Plus } from 'lucide-react';
+import { Eye, LoaderCircle, Lock, LockOpen, Plus } from 'lucide-react';
 import Layout from '../Layout.jsx';
 import { api } from '../api.js';
 
@@ -72,6 +72,10 @@ export default function HostWeeks() {
             </div>
 
             <Link className="btn secondary small" to={`/host/week/${week.weekNumber}`}>Edit</Link>
+
+            <a className="btn ghost small" href={`/q/${week.weekNumber}?preview=1`} target="_blank" rel="noreferrer">
+              <Eye size={14} /> Preview
+            </a>
 
             {published && (
               <button

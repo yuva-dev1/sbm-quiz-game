@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, LoaderCircle, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, Eye, LoaderCircle, Plus, Sparkles, Trash2 } from 'lucide-react';
 import Layout from '../Layout.jsx';
 import { api } from '../api.js';
 import { generateWithProgress } from '../generateClient.js';
@@ -243,6 +243,9 @@ export default function HostWeekEditor() {
         <button className="btn" type="button" onClick={save} disabled={saving}>
           {saving ? <LoaderCircle className="spin" size={16} /> : null} Save quiz
         </button>
+        <a className="btn secondary" href={`/q/${weekNumber}?preview=1`} target="_blank" rel="noreferrer">
+          <Eye size={16} /> Preview (saved version)
+        </a>
         {savedNote && <span className="info" style={{ margin: 0 }}>{savedNote}</span>}
         {saveError && <span className="error" style={{ margin: 0 }}>{saveError}</span>}
         <button className="btn ghost" type="button" onClick={() => navigate('/host')}>Done</button>

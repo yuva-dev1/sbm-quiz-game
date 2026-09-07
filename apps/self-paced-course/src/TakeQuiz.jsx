@@ -14,6 +14,7 @@ export default function TakeQuiz() {
   const [params] = useSearchParams();
   const sid = params.get('sid') || '';
   const back = params.get('back') || '';
+  const preview = params.get('preview') === '1';
 
   const [state, setState] = useState({ loading: true, error: '', data: null });
   const [selected, setSelected] = useState({});
@@ -24,11 +25,12 @@ export default function TakeQuiz() {
 
   const load = useCallback(() => {
     setState({ loading: true, error: '', data: null });
+    const q = preview ? 'preview=1' : `sid=${encodeURIComponent(sid)}`;
     api
-      .get(`/api/q/${n}?sid=${encodeURIComponent(sid)}`)
+      .get(`/api/q/${n}?${q}`)
       .then((data) => setState({ loading: false, error: '', data }))
       .catch((error) => setState({ loading: false, error: error.message, data: null }));
-  }, [n, sid]);
+  }, [n, sid, preview]);
 
   useEffect(load, [load]);
 
@@ -87,7 +89,8 @@ export default function TakeQuiz() {
     setSubmitError('');
     setSubmitting(true);
     try {
-      const { attempt } = await api.post(`/api/q/${n}/submit`, { sid, selected });
+      const body = preview ? { preview: true, selected } : { sid, selected };
+      const { attempt } = await api.post(`/api/q/${n}/submit`, body);
       setResult(attempt);
       rootRef.current?.scrollIntoView({ block: 'start' });
     } catch (error) {
@@ -105,6 +108,11 @@ export default function TakeQuiz() {
 
   return wrap(
     <>
+      {preview && (
+        <p className="info" style={{ marginBottom: 12 }}>
+          Host preview — this is exactly what a student sees. Nothing is saved.
+        </p>
+      )}
       <p className="eyebrow">Week {week.weekNumber} quiz{firstName ? ` · ${firstName}` : ''}</p>
       <h1 style={{ fontSize: 30 }}>{result ? 'Your results' : week.title}</h1>
 
@@ -118,8 +126,12 @@ export default function TakeQuiz() {
         <p className="muted" style={{ marginTop: 4 }}>Your best so far: {bestPercentage}%.</p>
       )}
 
-      {!week.open && !result && (
+      {!week.open && !result && !preview && (
         <p className="info">This quiz is currently closed for submissions. You can still review the questions.</p>
+      )}
+
+      {week.questions.length === 0 && (
+        <p className="muted">No questions yet — add some in the host quiz editor.</p>
       )}
 
       {week.questions.map((question, index) => (
@@ -150,7 +162,7 @@ export default function TakeQuiz() {
               </a>
             )}
           </>
-        ) : week.open ? (
+        ) : week.open && week.questions.length > 0 ? (
           <button className="btn" type="button" onClick={submit} disabled={submitting}>
             {submitting ? <LoaderCircle className="spin" size={16} /> : <ClipboardCheck size={16} />} Submit quiz
           </button>

@@ -14,7 +14,11 @@ import {
   saveAttempt,
   listAttempts,
   listAllAttempts,
-  deleteAttempt
+  deleteAttempt,
+  listQuizVersions,
+  getQuizVersion,
+  restoreQuizVersion,
+  labelQuizVersion
 } from './sheetsClient.js';
 import { fetchMemberProfile, isPlausibleSiteUserId } from './squarespace.js';
 import { gradeQuiz } from './grading.js';
@@ -62,7 +66,8 @@ function hydrateWeek(row) {
     responsesOpen: Boolean(row.responsesOpen),
     opensAt: row.opensAt ? new Date(row.opensAt) : null,
     closesAt: row.closesAt ? new Date(row.closesAt) : null,
-    updatedAt: row.updatedAt || null
+    updatedAt: row.updatedAt || null,
+    liveVersion: Number(row.liveVersion) || 0
   };
 }
 
@@ -162,6 +167,21 @@ app.get('/api/q/:n', async (req, res) => {
       return;
     }
 
+    // Host preview only: ?v=N shows a specific saved version instead of the live
+    // one. Students always get the live quiz (week.quiz).
+    let questions = week.quiz;
+    let shownVersion = week.liveVersion || null;
+    const requestedVersion = Number(req.query.v);
+    if (preview && Number.isInteger(requestedVersion) && requestedVersion > 0 && requestedVersion !== week.liveVersion) {
+      const vres = await getQuizVersion(weekNumber, requestedVersion).catch(() => ({ ok: false }));
+      if (!vres.ok || !vres.version) {
+        res.status(404).json({ error: `Version ${requestedVersion} of this quiz was not found.` });
+        return;
+      }
+      questions = Array.isArray(vres.version.quiz) ? vres.version.quiz : [];
+      shownVersion = requestedVersion;
+    }
+
     let bestPercentage = null;
     let lastPercentage = null;
     let attemptCount = 0;
@@ -183,12 +203,14 @@ app.get('/api/q/:n', async (req, res) => {
       lastPercentage,
       attemptCount,
       preview,
+      version: shownVersion,
+      liveVersion: week.liveVersion || null,
       week: {
         weekNumber: week.weekNumber,
         title: week.title,
         windowState: describeWindowState(week),
         open: preview ? true : isAcceptingResponses(week),
-        questions: week.quiz.map(toStudentQuestion)
+        questions: questions.map(toStudentQuestion)
       }
     });
   } catch (error) {
@@ -260,6 +282,7 @@ app.post('/api/q/:n/submit', async (req, res) => {
       correctCount: graded.correctCount,
       totalQuestions: graded.totalQuestions,
       percentage: graded.percentage,
+      quizVersion: week.liveVersion || null,
       answers: graded.answers
     };
 
@@ -299,7 +322,8 @@ app.get('/api/host/weeks', requireHost(SESSION_SECRET), async (req, res) => {
         responsesOpen: week.responsesOpen,
         opensAt: week.opensAt ? week.opensAt.toISOString() : null,
         closesAt: week.closesAt ? week.closesAt.toISOString() : null,
-        updatedAt: week.updatedAt
+        updatedAt: week.updatedAt,
+        liveVersion: week.liveVersion || null
       }))
     });
   } catch (error) {
@@ -377,6 +401,69 @@ app.post('/api/host/weeks/:n/unpublish', requireHost(SESSION_SECRET), (req, res)
 app.post('/api/host/weeks/:n/responses', requireHost(SESSION_SECRET), (req, res) =>
   setStatus(req, res, { responsesOpen: req.body?.open === true })
 );
+
+// --------------------------------------------------------- Host: quiz versions
+
+// Every saved edit of a week's quiz is kept. The newest is normally live;
+// "restore" points live back at an older one.
+app.get('/api/host/weeks/:n/versions', requireHost(SESSION_SECRET), async (req, res) => {
+  const weekNumber = Number(req.params.n);
+  if (!Number.isInteger(weekNumber) || weekNumber < 1) return badRequest(res, 'Unknown quiz.');
+  try {
+    const result = await listQuizVersions(weekNumber);
+    if (!result.ok) {
+      res.status(502).json({ error: result.error || 'Could not load version history.' });
+      return;
+    }
+    res.json({ liveVersion: result.liveVersion || null, versions: result.versions || [] });
+  } catch (error) {
+    console.error('host list quiz versions error:', error);
+    res.status(502).json({ error: 'Could not reach the course sheet. Please try again.' });
+  }
+});
+
+app.post('/api/host/weeks/:n/versions/:v/restore', requireHost(SESSION_SECRET), async (req, res) => {
+  const weekNumber = Number(req.params.n);
+  const version = Number(req.params.v);
+  if (!Number.isInteger(weekNumber) || weekNumber < 1 || !Number.isInteger(version) || version < 1) {
+    return badRequest(res, 'Unknown quiz version.');
+  }
+  try {
+    const result = await restoreQuizVersion(weekNumber, version);
+    if (!result.ok) {
+      res.status(result.error === 'No such version.' ? 404 : 502).json({
+        error: result.error || 'Could not restore this version.'
+      });
+      return;
+    }
+    res.json({ ok: true, liveVersion: result.liveVersion || version });
+  } catch (error) {
+    console.error('host restore quiz version error:', error);
+    res.status(502).json({ error: 'Could not reach the course sheet. Please try again.' });
+  }
+});
+
+app.post('/api/host/weeks/:n/versions/:v/label', requireHost(SESSION_SECRET), async (req, res) => {
+  const weekNumber = Number(req.params.n);
+  const version = Number(req.params.v);
+  if (!Number.isInteger(weekNumber) || weekNumber < 1 || !Number.isInteger(version) || version < 1) {
+    return badRequest(res, 'Unknown quiz version.');
+  }
+  const label = String(req.body?.label || '').trim().slice(0, 120);
+  try {
+    const result = await labelQuizVersion(weekNumber, version, label);
+    if (!result.ok) {
+      res.status(result.error === 'No such version.' ? 404 : 502).json({
+        error: result.error || 'Could not rename this version.'
+      });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('host label quiz version error:', error);
+    res.status(502).json({ error: 'Could not reach the course sheet. Please try again.' });
+  }
+});
 
 // ------------------------------------------------------------------ Host: scores
 
@@ -458,12 +545,13 @@ app.get('/api/host/attempts.csv', requireHost(SESSION_SECRET), async (req, res) 
     }
     const attempts = listAttemptsNewestFirst(result.attempts);
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['AttemptId', 'Name', 'Email', 'Week', 'SubmittedAt', 'Correct', 'Total', 'Percentage'];
+    const header = ['AttemptId', 'Name', 'Email', 'Week', 'QuizVersion', 'SubmittedAt', 'Correct', 'Total', 'Percentage'];
     const rows = attempts.map((a) => [
       a.id,
       a.name,
       a.email,
       a.weekNumber,
+      a.quizVersion ? `v${a.quizVersion}` : '',
       a.submittedAt,
       a.correctCount,
       a.totalQuestions,

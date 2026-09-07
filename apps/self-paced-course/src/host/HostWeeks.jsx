@@ -63,7 +63,11 @@ export default function HostWeeks() {
         return (
           <div className="card" key={week.weekNumber} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 240px' }}>
-              <span className="kicker">Week {week.weekNumber}{published ? `  ·  /q/${week.weekNumber}` : ''}</span>
+              <span className="kicker">
+                Week {week.weekNumber}
+                {week.liveVersion ? `  ·  v${week.liveVersion}` : ''}
+                {published ? `  ·  /q/${week.weekNumber}` : ''}
+              </span>
               <h2 style={{ fontSize: 22 }}>{week.title}</h2>
               <div className="meta">
                 <span>{week.quiz.length} question{week.quiz.length === 1 ? '' : 's'}</span>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Eye, LoaderCircle, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, Eye, History, LoaderCircle, Pencil, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import Layout from '../Layout.jsx';
 import { api } from '../api.js';
 import { generateWithProgress } from '../generateClient.js';
@@ -41,6 +41,9 @@ export default function HostWeekEditor() {
   const [closesAt, setClosesAt] = useState('');
   const [questions, setQuestions] = useState([]);
 
+  const [versions, setVersions] = useState({ liveVersion: null, list: [] });
+  const [versionBusy, setVersionBusy] = useState(null);
+
   const [catalog, setCatalog] = useState({ weeks: [] });
   const [genWeekIds, setGenWeekIds] = useState([]);
   const [genTopic, setGenTopic] = useState('');
@@ -75,6 +78,45 @@ export default function HostWeekEditor() {
   }, [weekNumber]);
 
   useEffect(load, [load]);
+
+  const loadVersions = useCallback(() => {
+    api
+      .get(`/api/host/weeks/${weekNumber}/versions`)
+      .then((data) => setVersions({ liveVersion: data.liveVersion || null, list: (data.versions || []).slice().reverse() }))
+      .catch(() => setVersions({ liveVersion: null, list: [] }));
+  }, [weekNumber]);
+
+  useEffect(loadVersions, [loadVersions]);
+
+  const restoreVersion = async (version) => {
+    if (!window.confirm(`Make version ${version} the live quiz? Students will see it immediately. Your current questions are already saved as their own version, so this is reversible.`)) {
+      return;
+    }
+    setVersionBusy(version);
+    try {
+      await api.post(`/api/host/weeks/${weekNumber}/versions/${version}/restore`);
+      load();
+      loadVersions();
+    } catch (error) {
+      setPageError(error.message);
+    } finally {
+      setVersionBusy(null);
+    }
+  };
+
+  const renameVersion = async (version, current) => {
+    const label = window.prompt('Name this version (e.g. "the one we kept"):', current || '');
+    if (label === null) return;
+    setVersionBusy(version);
+    try {
+      await api.post(`/api/host/weeks/${weekNumber}/versions/${version}/label`, { label: label.trim() });
+      loadVersions();
+    } catch (error) {
+      setPageError(error.message);
+    } finally {
+      setVersionBusy(null);
+    }
+  };
 
   const genTopics = useMemo(() => {
     const picked = catalog.weeks.filter((w) => genWeekIds.includes(w.id));
@@ -123,6 +165,7 @@ export default function HostWeekEditor() {
         closesAt: closesAt ? new Date(closesAt).toISOString() : null
       });
       setSavedNote('Saved.');
+      loadVersions();
     } catch (error) {
       setSaveError(error.message);
     } finally {
@@ -252,12 +295,20 @@ export default function HostWeekEditor() {
       </div>
 
       <PreviewLink weekNumber={weekNumber} />
+
+      <VersionHistory
+        weekNumber={weekNumber}
+        versions={versions}
+        busy={versionBusy}
+        onRestore={restoreVersion}
+        onRename={renameVersion}
+      />
     </Layout>
   );
 }
 
-/** The shareable host-preview URL for this week — always renders whatever the
- *  host last saved (there is one live quiz per week, not a version history). */
+/** The shareable host-preview URL for this week — opens whatever is currently
+ *  live (the newest save, or an older version you restored). */
 function PreviewLink({ weekNumber }) {
   const [copied, setCopied] = useState(false);
   const url = `${window.location.origin}/q/${weekNumber}?preview=1`;
@@ -272,10 +323,86 @@ function PreviewLink({ weekNumber }) {
   };
   return (
     <p className="muted" style={{ marginTop: 14, fontSize: 13, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <span>Preview link (opens the latest saved quiz — sign in to <code>/host</code> first):</span>
+      <span>Preview link (opens the live quiz — sign in to <code>/host</code> first):</span>
       <code style={{ background: 'var(--ground)', padding: '2px 6px', borderRadius: 6, wordBreak: 'break-all' }}>{url}</code>
       <button type="button" className="linkbtn" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
     </p>
+  );
+}
+
+/** Every saved edit of this week's quiz. The newest is normally live; "Restore"
+ *  points the live quiz back at an older one (students see it right away). */
+function VersionHistory({ weekNumber, versions, busy, onRestore, onRename }) {
+  const list = versions.list || [];
+  if (list.length === 0) return null;
+
+  return (
+    <div className="card" style={{ marginTop: 24 }}>
+      <p className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <History size={14} /> Version history
+      </p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+        Every save is kept. Restoring an older version makes it the live quiz — nothing is lost.
+      </p>
+      <div className="table-scroll">
+        <table className="grid-table">
+          <thead>
+            <tr>
+              <th>Version</th>
+              <th>Saved</th>
+              <th>Name</th>
+              <th aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((v) => {
+              const spinning = busy === v.version;
+              return (
+                <tr key={v.version}>
+                  <td className="num">
+                    v{v.version}
+                    {v.isLive && <span className="pill open" style={{ marginLeft: 6 }}>Live</span>}
+                  </td>
+                  <td>{v.createdAt ? new Date(v.createdAt).toLocaleString() : '—'}</td>
+                  <td>{v.label || <span className="muted">—</span>}</td>
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    <a
+                      className="btn ghost small"
+                      href={`/q/${weekNumber}?preview=1&v=${v.version}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Preview this version"
+                    >
+                      <Eye size={13} />
+                    </a>{' '}
+                    <button
+                      className="btn ghost small"
+                      type="button"
+                      onClick={() => onRename(v.version, v.label)}
+                      disabled={spinning}
+                      title="Rename"
+                    >
+                      <Pencil size={13} />
+                    </button>{' '}
+                    {!v.isLive && (
+                      <button
+                        className="btn small"
+                        type="button"
+                        onClick={() => onRestore(v.version)}
+                        disabled={spinning}
+                        title="Make this the live quiz"
+                      >
+                        {spinning ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />} Restore
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

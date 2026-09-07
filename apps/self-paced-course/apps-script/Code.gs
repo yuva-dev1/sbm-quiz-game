@@ -18,16 +18,22 @@
  *
  * Tabs are created automatically the first time they're needed.
  *
- *   Members  : SiteUserId, Email, FirstName, LastName, FirstSeenAt
- *              (identity cached from the Squarespace Profiles API by the app server)
- *   Weeks    : WeekNumber, Title, Status, QuizJSON, ResponsesOpen, OpensAt, ClosesAt, UpdatedAt
- *   Attempts : AttemptId, SiteUserId, Email, Name, WeekNumber, SubmittedAt,
- *              CorrectCount, TotalQuestions, Percentage, AnswersJSON
+ *   Members      : SiteUserId, Email, FirstName, LastName, FirstSeenAt
+ *                  (identity cached from the Squarespace Profiles API by the app server)
+ *   Weeks        : WeekNumber, Title, Status, QuizJSON, ResponsesOpen, OpensAt, ClosesAt,
+ *                  UpdatedAt, LiveVersion
+ *                  (QuizJSON is always a copy of the live version's questions, so
+ *                  reads/grading never need the QuizVersions tab)
+ *   Attempts     : AttemptId, SiteUserId, Email, Name, WeekNumber, SubmittedAt,
+ *                  CorrectCount, TotalQuestions, Percentage, AnswersJSON, QuizVersion
+ *   QuizVersions : WeekNumber, Version, Label, QuizJSON, CreatedAt
+ *                  (append-only history — one row per saved edit of a week's quiz)
  */
 
 const MEMBERS_HEADERS = ['SiteUserId', 'Email', 'FirstName', 'LastName', 'FirstSeenAt'];
-const WEEKS_HEADERS = ['WeekNumber', 'Title', 'Status', 'QuizJSON', 'ResponsesOpen', 'OpensAt', 'ClosesAt', 'UpdatedAt'];
-const ATTEMPTS_HEADERS = ['AttemptId', 'SiteUserId', 'Email', 'Name', 'WeekNumber', 'SubmittedAt', 'CorrectCount', 'TotalQuestions', 'Percentage', 'AnswersJSON'];
+const WEEKS_HEADERS = ['WeekNumber', 'Title', 'Status', 'QuizJSON', 'ResponsesOpen', 'OpensAt', 'ClosesAt', 'UpdatedAt', 'LiveVersion'];
+const ATTEMPTS_HEADERS = ['AttemptId', 'SiteUserId', 'Email', 'Name', 'WeekNumber', 'SubmittedAt', 'CorrectCount', 'TotalQuestions', 'Percentage', 'AnswersJSON', 'QuizVersion'];
+const QUIZ_VERSIONS_HEADERS = ['WeekNumber', 'Version', 'Label', 'QuizJSON', 'CreatedAt'];
 
 /** Run once from the editor after pasting + setting SHEET_ID, to grant the
  *  Spreadsheet scope and create the three tabs. */
@@ -35,6 +41,45 @@ function authorize() {
   getOrCreateSheet('Members', MEMBERS_HEADERS);
   getOrCreateSheet('Weeks', WEEKS_HEADERS);
   getOrCreateSheet('Attempts', ATTEMPTS_HEADERS);
+  getOrCreateSheet('QuizVersions', QUIZ_VERSIONS_HEADERS);
+  ensureColumn(weeksSheet(), 'LiveVersion');
+  ensureColumn(attemptsSheet(), 'QuizVersion');
+}
+
+/**
+ * One-time migration: give every week that already has a quiz a "Version 1"
+ * row in QuizVersions and point LiveVersion at it. Safe to run more than once —
+ * it skips weeks that already have version rows. Run from the editor.
+ */
+function backfillVersions() {
+  getOrCreateSheet('QuizVersions', QUIZ_VERSIONS_HEADERS);
+  ensureColumn(weeksSheet(), 'LiveVersion');
+  ensureColumn(attemptsSheet(), 'QuizVersion');
+
+  var sheet = weeksSheet();
+  var rows = getDataRows(sheet);
+  var report = [];
+  for (var i = 0; i < rows.length; i++) {
+    var week = weekRowToObject(rows[i]);
+    var rowIndex = i + 2;
+    var existing = listVersionsFor(week.weekNumber);
+    if (existing.length > 0) { report.push('week ' + week.weekNumber + ': already has ' + existing.length + ' version(s)'); continue; }
+    if (!week.quiz || week.quiz.length === 0) { report.push('week ' + week.weekNumber + ': no quiz, skipped'); continue; }
+    var createdAt = week.updatedAt || new Date().toISOString();
+    appendVersionRow(week.weekNumber, 1, 'Initial', JSON.stringify(week.quiz), createdAt);
+    sheet.getRange(rowIndex, weeksCol('LiveVersion')).setValue(1);
+    report.push('week ' + week.weekNumber + ': created Version 1');
+  }
+  Logger.log(report.join('\n'));
+  return report;
+}
+
+/** Append `name` as a new header column on `sheet` if it isn't there yet. */
+function ensureColumn(sheet, name) {
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (headers.indexOf(name) !== -1) return;
+  sheet.getRange(1, lastCol + 1).setValue(name);
 }
 
 function doPost(e) {
@@ -79,6 +124,14 @@ function handleRequest(e) {
       return handleListAllAttempts();
     case 'deleteAttempt':
       return handleDeleteAttempt(body);
+    case 'listQuizVersions':
+      return handleListQuizVersions(body);
+    case 'getQuizVersion':
+      return handleGetQuizVersion(body);
+    case 'restoreQuizVersion':
+      return handleRestoreQuizVersion(body);
+    case 'labelQuizVersion':
+      return handleLabelQuizVersion(body);
     default:
       return jsonResponse({ ok: false, error: 'Unknown action: ' + body.action });
   }
@@ -152,6 +205,7 @@ function weeksCol(name) {
 }
 
 function weekRowToObject(values) {
+  var liveVersionCol = weeksCol('LiveVersion');
   return {
     weekNumber: Number(values[weeksCol('WeekNumber') - 1]),
     title: String(values[weeksCol('Title') - 1] || ''),
@@ -162,7 +216,8 @@ function weekRowToObject(values) {
       String(values[weeksCol('ResponsesOpen') - 1]).toLowerCase() === 'true',
     opensAt: values[weeksCol('OpensAt') - 1] ? String(values[weeksCol('OpensAt') - 1]) : null,
     closesAt: values[weeksCol('ClosesAt') - 1] ? String(values[weeksCol('ClosesAt') - 1]) : null,
-    updatedAt: values[weeksCol('UpdatedAt') - 1] ? String(values[weeksCol('UpdatedAt') - 1]) : null
+    updatedAt: values[weeksCol('UpdatedAt') - 1] ? String(values[weeksCol('UpdatedAt') - 1]) : null,
+    liveVersion: liveVersionCol > 0 && values[liveVersionCol - 1] ? Number(values[liveVersionCol - 1]) : 0
   };
 }
 
@@ -194,12 +249,15 @@ function handleUpsertWeek(body) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    getOrCreateSheet('QuizVersions', QUIZ_VERSIONS_HEADERS);
+    ensureColumn(weeksSheet(), 'LiveVersion');
     var sheet = weeksSheet();
     var row = findRowByValue(sheet, weeksCol('WeekNumber'), String(weekNumber));
     var now = new Date().toISOString();
     var quizJson = JSON.stringify(week.quiz || []);
     var opensAt = week.opensAt ? String(week.opensAt) : '';
     var closesAt = week.closesAt ? String(week.closesAt) : '';
+    var hasQuestions = Array.isArray(week.quiz) && week.quiz.length > 0;
 
     if (row === -1) {
       var newRow = [];
@@ -211,8 +269,18 @@ function handleUpsertWeek(body) {
       newRow[weeksCol('OpensAt') - 1] = opensAt;
       newRow[weeksCol('ClosesAt') - 1] = closesAt;
       newRow[weeksCol('UpdatedAt') - 1] = now;
+      newRow[weeksCol('LiveVersion') - 1] = hasQuestions ? 1 : '';
       sheet.appendRow(newRow);
+      if (hasQuestions) appendVersionRow(weekNumber, 1, '', quizJson, now);
     } else {
+      var currentJson = String(sheet.getRange(row, weeksCol('QuizJSON')).getValue() || '[]');
+      // A new version is cut only when the QUESTIONS change — renaming the quiz
+      // or moving its open/close dates doesn't spawn one.
+      if (hasQuestions && quizJson !== currentJson) {
+        var nextVersion = nextVersionNumber(weekNumber);
+        appendVersionRow(weekNumber, nextVersion, '', quizJson, now);
+        sheet.getRange(row, weeksCol('LiveVersion')).setValue(nextVersion);
+      }
       sheet.getRange(row, weeksCol('Title')).setValue(title);
       sheet.getRange(row, weeksCol('QuizJSON')).setValue(quizJson);
       sheet.getRange(row, weeksCol('OpensAt')).setValue(opensAt);
@@ -261,6 +329,7 @@ function handleSaveAttempt(body) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    ensureColumn(attemptsSheet(), 'QuizVersion');
     attemptsSheet().appendRow([
       String(a.id || Utilities.getUuid()),
       sid,
@@ -271,7 +340,8 @@ function handleSaveAttempt(body) {
       Number(a.correctCount || 0),
       Number(a.totalQuestions || 0),
       Number(a.percentage || 0),
-      JSON.stringify(a.answers || [])
+      JSON.stringify(a.answers || []),
+      a.quizVersion ? Number(a.quizVersion) : ''
     ]);
     return jsonResponse({ ok: true });
   } finally {
@@ -290,7 +360,8 @@ function attemptRowToObject(row) {
     correctCount: Number(row[6]),
     totalQuestions: Number(row[7]),
     percentage: Number(row[8]),
-    answers: safeParseJson(row[9], [])
+    answers: safeParseJson(row[9], []),
+    quizVersion: row[10] ? Number(row[10]) : null
   };
 }
 
@@ -321,6 +392,129 @@ function handleDeleteAttempt(body) {
     var row = findRowByValue(sheet, 1, id); // AttemptId is column 1
     if (row === -1) return jsonResponse({ ok: false, error: 'No such attempt.' });
     sheet.deleteRow(row);
+    return jsonResponse({ ok: true });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ------------------------------------------------------------------ QuizVersions
+
+function quizVersionsSheet() {
+  return getOrCreateSheet('QuizVersions', QUIZ_VERSIONS_HEADERS);
+}
+
+/** Raw QuizVersions rows for one week, oldest first: {version, label, quizJson, createdAt}. */
+function listVersionsFor(weekNumber) {
+  var rows = getDataRows(quizVersionsSheet());
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (Number(rows[i][0]) !== Number(weekNumber)) continue;
+    out.push({
+      version: Number(rows[i][1]),
+      label: String(rows[i][2] || ''),
+      quizJson: String(rows[i][3] || '[]'),
+      createdAt: String(rows[i][4] || '')
+    });
+  }
+  out.sort(function (a, b) { return a.version - b.version; });
+  return out;
+}
+
+function nextVersionNumber(weekNumber) {
+  var versions = listVersionsFor(weekNumber);
+  var max = 0;
+  for (var i = 0; i < versions.length; i++) if (versions[i].version > max) max = versions[i].version;
+  return max + 1;
+}
+
+function appendVersionRow(weekNumber, version, label, quizJson, createdAt) {
+  quizVersionsSheet().appendRow([
+    Number(weekNumber),
+    Number(version),
+    String(label || ''),
+    String(quizJson || '[]'),
+    String(createdAt || new Date().toISOString())
+  ]);
+}
+
+function findVersionRow(weekNumber, version) {
+  var sheet = quizVersionsSheet();
+  var rows = getDataRows(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (Number(rows[i][0]) === Number(weekNumber) && Number(rows[i][1]) === Number(version)) {
+      return i + 2; // +2: header row + 1-indexed
+    }
+  }
+  return -1;
+}
+
+function handleListQuizVersions(body) {
+  var weekNumber = Number(body.weekNumber);
+  var sheet = weeksSheet();
+  var weekRow = findRowByValue(sheet, weeksCol('WeekNumber'), String(weekNumber));
+  var liveVersion = 0;
+  if (weekRow !== -1) {
+    var v = sheet.getRange(weekRow, weeksCol('LiveVersion')).getValue();
+    liveVersion = v ? Number(v) : 0;
+  }
+  var versions = listVersionsFor(weekNumber).map(function (r) {
+    return { version: r.version, label: r.label, createdAt: r.createdAt, isLive: r.version === liveVersion };
+  });
+  return jsonResponse({ ok: true, liveVersion: liveVersion, versions: versions });
+}
+
+function handleGetQuizVersion(body) {
+  var weekNumber = Number(body.weekNumber);
+  var version = Number(body.version);
+  var match = null;
+  var all = listVersionsFor(weekNumber);
+  for (var i = 0; i < all.length; i++) if (all[i].version === version) match = all[i];
+  if (!match) return jsonResponse({ ok: false, error: 'No such version.' });
+  return jsonResponse({
+    ok: true,
+    version: { version: match.version, label: match.label, createdAt: match.createdAt, quiz: safeParseJson(match.quizJson, []) }
+  });
+}
+
+/** Point a week's live quiz back at an older version (a "restore"). Copies that
+ *  version's questions into Weeks.QuizJSON and updates LiveVersion; no new
+ *  version row is cut. */
+function handleRestoreQuizVersion(body) {
+  var weekNumber = Number(body.weekNumber);
+  var version = Number(body.version);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    ensureColumn(weeksSheet(), 'LiveVersion');
+    var target = null;
+    var all = listVersionsFor(weekNumber);
+    for (var i = 0; i < all.length; i++) if (all[i].version === version) target = all[i];
+    if (!target) return jsonResponse({ ok: false, error: 'No such version.' });
+
+    var sheet = weeksSheet();
+    var row = findRowByValue(sheet, weeksCol('WeekNumber'), String(weekNumber));
+    if (row === -1) return jsonResponse({ ok: false, error: 'No such week.' });
+
+    sheet.getRange(row, weeksCol('QuizJSON')).setValue(target.quizJson);
+    sheet.getRange(row, weeksCol('LiveVersion')).setValue(version);
+    sheet.getRange(row, weeksCol('UpdatedAt')).setValue(new Date().toISOString());
+    return jsonResponse({ ok: true, liveVersion: version });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleLabelQuizVersion(body) {
+  var weekNumber = Number(body.weekNumber);
+  var version = Number(body.version);
+  var label = String(body.label || '').slice(0, 120);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var rowIndex = findVersionRow(weekNumber, version);
+    if (rowIndex === -1) return jsonResponse({ ok: false, error: 'No such version.' });
+    quizVersionsSheet().getRange(rowIndex, 3).setValue(label); // Label is column 3
     return jsonResponse({ ok: true });
   } finally {
     lock.releaseLock();

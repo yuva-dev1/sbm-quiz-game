@@ -69,7 +69,8 @@ export function listAttemptsNewestFirst(attempts) {
       submittedAt: a.submittedAt || '',
       correctCount: Number(a.correctCount) || 0,
       totalQuestions: Number(a.totalQuestions) || 0,
-      percentage: Number(a.percentage) || 0
+      percentage: Number(a.percentage) || 0,
+      quizVersion: a.quizVersion != null && a.quizVersion !== '' ? Number(a.quizVersion) : null
     }))
     .sort((x, y) => new Date(y.submittedAt).getTime() - new Date(x.submittedAt).getTime());
 }

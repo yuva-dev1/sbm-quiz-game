@@ -85,3 +85,25 @@ export async function listAllAttempts() {
 export async function deleteAttempt(attemptId) {
   return callSheetsScript({ action: 'deleteAttempt', attemptId });
 }
+
+// ---- Quiz versions (append-only history of each week's saved quizzes) ----
+
+/** @returns { ok, liveVersion, versions: [{ version, label, createdAt, isLive }] } */
+export async function listQuizVersions(weekNumber) {
+  return callSheetsScript({ action: 'listQuizVersions', weekNumber });
+}
+
+/** @returns { ok, version: { version, label, createdAt, quiz } } */
+export async function getQuizVersion(weekNumber, version) {
+  return callSheetsScript({ action: 'getQuizVersion', weekNumber, version });
+}
+
+/** Point the week's live quiz back at an older version. */
+export async function restoreQuizVersion(weekNumber, version) {
+  return callSheetsScript({ action: 'restoreQuizVersion', weekNumber, version });
+}
+
+/** Rename a version (e.g. "the one we kept"). */
+export async function labelQuizVersion(weekNumber, version, label) {
+  return callSheetsScript({ action: 'labelQuizVersion', weekNumber, version, label });
+}

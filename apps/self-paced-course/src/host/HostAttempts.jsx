@@ -85,6 +85,7 @@ export default function HostAttempts() {
                 <tr>
                   <th>Student</th>
                   <th>Week</th>
+                  <th>Quiz version</th>
                   <th>Submitted</th>
                   <th>Score</th>
                   <th aria-label="Delete" />
@@ -98,6 +99,7 @@ export default function HostAttempts() {
                       <div className="muted" style={{ fontSize: 12 }}>{a.email}</div>
                     </td>
                     <td className="num">{a.weekNumber}</td>
+                    <td className="num">{a.quizVersion ? `v${a.quizVersion}` : '—'}</td>
                     <td>{a.submittedAt ? new Date(a.submittedAt).toLocaleString() : '—'}</td>
                     <td className="num">{a.percentage}% <span className="muted" style={{ fontSize: 11 }}>({a.correctCount}/{a.totalQuestions})</span></td>
                     <td className="num">

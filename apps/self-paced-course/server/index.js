@@ -13,12 +13,14 @@ import {
   getWeek,
   saveAttempt,
   listAttempts,
-  listAllAttempts
+  listAllAttempts,
+  deleteAttempt
 } from './sheetsClient.js';
 import { fetchMemberProfile, isPlausibleSiteUserId } from './squarespace.js';
 import { gradeQuiz } from './grading.js';
 import { describeWindowState, isAcceptingResponses } from './schedule.js';
 import { normalizeGeneratedQuestions, toStudentQuestion } from './generatedQuestions.js';
+import { listAttemptsNewestFirst, summarizeAttempts } from './attemptsSummary.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, '..', 'dist');
@@ -161,15 +163,25 @@ app.get('/api/q/:n', async (req, res) => {
     }
 
     let bestPercentage = null;
+    let lastPercentage = null;
+    let attemptCount = 0;
     if (!preview) {
       const history = await listAttempts(member.siteUserId).catch(() => ({ ok: false }));
-      const forWeek = (history.ok ? history.attempts || [] : []).filter((a) => Number(a.weekNumber) === weekNumber);
-      bestPercentage = forWeek.length ? Math.max(...forWeek.map((a) => Number(a.percentage) || 0)) : null;
+      const forWeek = (history.ok ? history.attempts || [] : [])
+        .filter((a) => Number(a.weekNumber) === weekNumber)
+        .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+      attemptCount = forWeek.length;
+      if (forWeek.length) {
+        bestPercentage = Math.max(...forWeek.map((a) => Number(a.percentage) || 0));
+        lastPercentage = Number(forWeek[forWeek.length - 1].percentage) || 0;
+      }
     }
 
     res.json({
       firstName: member ? member.firstName || '' : '',
       bestPercentage,
+      lastPercentage,
+      attemptCount,
       preview,
       week: {
         weekNumber: week.weekNumber,
@@ -368,30 +380,6 @@ app.post('/api/host/weeks/:n/responses', requireHost(SESSION_SECRET), (req, res)
 
 // ------------------------------------------------------------------ Host: scores
 
-/** latest attempt per (siteUserId, weekNumber), grouped by member. */
-function summarizeAttempts(attempts) {
-  const latest = new Map();
-  for (const a of attempts || []) {
-    const uid = String(a.siteUserId || a.email || '').toLowerCase();
-    if (!uid) continue;
-    const key = `${uid}::${Number(a.weekNumber)}`;
-    const prev = latest.get(key);
-    if (!prev || new Date(a.submittedAt) > new Date(prev.submittedAt)) latest.set(key, a);
-  }
-  const members = new Map();
-  for (const a of latest.values()) {
-    const uid = String(a.siteUserId || a.email || '').toLowerCase();
-    if (!members.has(uid)) members.set(uid, { name: a.name || '', email: a.email || '', cells: {} });
-    members.get(uid).cells[Number(a.weekNumber)] = {
-      percentage: Number(a.percentage) || 0,
-      correctCount: Number(a.correctCount) || 0,
-      totalQuestions: Number(a.totalQuestions) || 0,
-      submittedAt: a.submittedAt
-    };
-  }
-  return [...members.values()].sort((x, y) => (x.name || x.email).localeCompare(y.name || y.email));
-}
-
 app.get('/api/host/scores', requireHost(SESSION_SECRET), async (req, res) => {
   try {
     const [weeksResult, attemptsResult] = await Promise.all([listWeeksForHost(), listAllAttempts()]);
@@ -434,6 +422,79 @@ app.get('/api/host/scores.csv', requireHost(SESSION_SECRET), async (req, res) =>
     res.status(200).send(csv);
   } catch (error) {
     console.error('host scores csv error:', error);
+    res.status(502).json({ error: 'Could not reach the course sheet. Please try again.' });
+  }
+});
+
+// ----------------------------------------------------------------- Host: attempts
+
+// Every attempt ever submitted, newest first — the "All attempts" page. Retakes
+// are all here (nothing is ever collapsed or overwritten); `?week=N` narrows it.
+app.get('/api/host/attempts', requireHost(SESSION_SECRET), async (req, res) => {
+  try {
+    const result = await listAllAttempts();
+    if (!result.ok) {
+      res.status(502).json({ error: result.error || 'Could not load attempts.' });
+      return;
+    }
+    let attempts = listAttemptsNewestFirst(result.attempts);
+    const weekFilter = Number(req.query.week);
+    if (Number.isInteger(weekFilter) && weekFilter > 0) {
+      attempts = attempts.filter((a) => a.weekNumber === weekFilter);
+    }
+    res.json({ attempts });
+  } catch (error) {
+    console.error('host attempts error:', error);
+    res.status(502).json({ error: 'Could not reach the course sheet. Please try again.' });
+  }
+});
+
+app.get('/api/host/attempts.csv', requireHost(SESSION_SECRET), async (req, res) => {
+  try {
+    const result = await listAllAttempts();
+    if (!result.ok) {
+      res.status(502).json({ error: result.error || 'Could not load attempts.' });
+      return;
+    }
+    const attempts = listAttemptsNewestFirst(result.attempts);
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['AttemptId', 'Name', 'Email', 'Week', 'SubmittedAt', 'Correct', 'Total', 'Percentage'];
+    const rows = attempts.map((a) => [
+      a.id,
+      a.name,
+      a.email,
+      a.weekNumber,
+      a.submittedAt,
+      a.correctCount,
+      a.totalQuestions,
+      `${a.percentage}%`
+    ]);
+    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="self-paced-course-attempts.csv"');
+    res.status(200).send(csv);
+  } catch (error) {
+    console.error('host attempts csv error:', error);
+    res.status(502).json({ error: 'Could not reach the course sheet. Please try again.' });
+  }
+});
+
+// Delete one attempt by id — for clearing a bogus or test submission. Real
+// student retakes are kept; this is a deliberate host action per row.
+app.post('/api/host/attempts/:id/delete', requireHost(SESSION_SECRET), async (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!id) return badRequest(res, 'An attempt id is required.');
+  try {
+    const result = await deleteAttempt(id);
+    if (!result.ok) {
+      res.status(result.error === 'No such attempt.' ? 404 : 502).json({
+        error: result.error || 'Could not delete this attempt.'
+      });
+      return;
+    }
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error('host delete attempt error:', error);
     res.status(502).json({ error: 'Could not reach the course sheet. Please try again.' });
   }
 });

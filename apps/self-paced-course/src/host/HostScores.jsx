@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Download, LoaderCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Download, LoaderCircle, ListChecks } from 'lucide-react';
 import Layout from '../Layout.jsx';
 import { api } from '../api.js';
 
@@ -19,8 +20,12 @@ export default function HostScores() {
         <div>
           <p className="eyebrow">Course host</p>
           <h1>Scores</h1>
+          <p className="muted" style={{ fontSize: 13 }}>Latest score per student per week. A retake shows &times;N — hover for best / last.</p>
         </div>
-        <a className="btn secondary" href="/api/host/scores.csv"><Download size={16} /> Download CSV</a>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <Link className="btn ghost" to="/host/attempts"><ListChecks size={16} /> All attempts</Link>
+          <a className="btn secondary" href="/api/host/scores.csv"><Download size={16} /> Download CSV</a>
+        </div>
       </div>
 
       {state.loading && <div className="center-load"><LoaderCircle className="spin" size={24} /></div>}
@@ -47,9 +52,23 @@ export default function HostScores() {
                     </td>
                     {state.weeks.map((w) => {
                       const cell = s.cells[w.weekNumber];
+                      const tip = cell
+                        ? `Latest ${cell.percentage}% · best ${cell.best}% · ${cell.attemptCount} attempt${cell.attemptCount === 1 ? '' : 's'} · last ${new Date(cell.submittedAt).toLocaleString()}`
+                        : '';
                       return (
-                        <td className="num" key={w.weekNumber} title={cell ? new Date(cell.submittedAt).toLocaleString() : ''}>
-                          {cell ? `${cell.percentage}%` : '—'}
+                        <td className="num" key={w.weekNumber} title={tip}>
+                          {cell ? (
+                            <>
+                              {cell.percentage}%
+                              {cell.attemptCount > 1 && (
+                                <span style={{ marginLeft: 5, fontSize: 11, color: 'var(--ink-soft)' }}>
+                                  &times;{cell.attemptCount}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                       );
                     })}

@@ -77,6 +77,8 @@ function handleRequest(e) {
       return handleListAttempts(body);
     case 'listAllAttempts':
       return handleListAllAttempts();
+    case 'deleteAttempt':
+      return handleDeleteAttempt(body);
     default:
       return jsonResponse({ ok: false, error: 'Unknown action: ' + body.action });
   }
@@ -304,6 +306,25 @@ function handleListAttempts(body) {
 function handleListAllAttempts() {
   var rows = getDataRows(attemptsSheet());
   return jsonResponse({ ok: true, attempts: rows.map(attemptRowToObject) });
+}
+
+/** Remove one attempt row by its AttemptId (host maintenance — deleting a
+ *  bogus or test attempt). Every real attempt is otherwise kept forever. */
+function handleDeleteAttempt(body) {
+  var id = String(body.attemptId || '').trim();
+  if (!id) return jsonResponse({ ok: false, error: 'attemptId is required.' });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sheet = attemptsSheet();
+    var row = findRowByValue(sheet, 1, id); // AttemptId is column 1
+    if (row === -1) return jsonResponse({ ok: false, error: 'No such attempt.' });
+    sheet.deleteRow(row);
+    return jsonResponse({ ok: true });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // --------------------------------------------------------------------- Helpers

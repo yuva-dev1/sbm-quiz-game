@@ -80,3 +80,8 @@ export async function listAttempts(siteUserId) {
 export async function listAllAttempts() {
   return callSheetsScript({ action: 'listAllAttempts' });
 }
+
+/** Remove one attempt row by AttemptId — host maintenance only. */
+export async function deleteAttempt(attemptId) {
+  return callSheetsScript({ action: 'deleteAttempt', attemptId });
+}

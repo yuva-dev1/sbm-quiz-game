@@ -1,0 +1,102 @@
+<!--
+  Srimad Bhagavatam Self-Paced Course — registration form.
+  Paste this whole block into a Squarespace Code Block.
+  Set COURSE_APP below to the course app's base URL.
+-->
+<div id="sbm-register">
+  <form class="sbm-form" novalidate>
+    <div class="sbm-row">
+      <label>First name<input name="firstName" autocomplete="given-name" required maxlength="80" /></label>
+      <label>Last name<input name="lastName" autocomplete="family-name" required maxlength="80" /></label>
+    </div>
+    <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+    <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required /></label>
+    <label>Confirm password<input name="confirm" type="password" autocomplete="new-password" minlength="8" required /></label>
+    <p class="sbm-msg" role="alert" hidden></p>
+    <button type="submit">Create my account</button>
+  </form>
+  <div class="sbm-done" hidden>
+    <p><strong>You're registered.</strong> Check your email for a welcome message.</p>
+    <p><a class="sbm-go" href="#">Go to the course &rarr;</a></p>
+  </div>
+</div>
+
+<style>
+  #sbm-register { max-width: 420px; margin: 0 auto; font-size: 15px; }
+  #sbm-register .sbm-form label,
+  #sbm-register .sbm-row label { display: grid; gap: 4px; margin-bottom: 12px; font-weight: 600; }
+  #sbm-register input {
+    padding: 10px 12px; border: 1px solid #cfcbbe; border-radius: 8px;
+    font: inherit; font-weight: 400; background: #fff;
+  }
+  #sbm-register .sbm-row { display: flex; gap: 10px; }
+  #sbm-register .sbm-row label { flex: 1 1 0; min-width: 0; }
+  #sbm-register button {
+    width: 100%; padding: 12px; border: 0; border-radius: 8px; cursor: pointer;
+    background: #2e3192; color: #fff; font: inherit; font-weight: 600;
+  }
+  #sbm-register button[disabled] { opacity: .6; cursor: default; }
+  #sbm-register .sbm-msg { margin: 4px 0 12px; padding: 9px 11px; border-radius: 8px;
+    background: rgba(179,38,30,.08); color: #b3261e; font-size: 13px; font-weight: 400; }
+  #sbm-register .sbm-done p { margin: 6px 0; }
+</style>
+
+<script>
+  (function () {
+    var COURSE_APP = 'https://self-paced.srimadbhagavatamcourse.org';
+
+    var root = document.getElementById('sbm-register');
+    var form = root.querySelector('.sbm-form');
+    var msg = root.querySelector('.sbm-msg');
+    var done = root.querySelector('.sbm-done');
+    var btn = form.querySelector('button');
+    root.querySelector('.sbm-go').href = COURSE_APP;
+
+    function showError(text) {
+      msg.textContent = text;
+      msg.hidden = false;
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      msg.hidden = true;
+
+      var data = {
+        firstName: form.firstName.value.trim(),
+        lastName: form.lastName.value.trim(),
+        email: form.email.value.trim().toLowerCase(),
+        password: form.password.value
+      };
+
+      if (!data.firstName || !data.lastName) return showError('Please enter your first and last name.');
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(data.email)) return showError('Enter a valid email address.');
+      if (data.password.length < 8) return showError('Password must be at least 8 characters.');
+      if (data.password !== form.confirm.value) return showError('Passwords do not match.');
+
+      btn.disabled = true;
+      btn.textContent = 'Creating your account…';
+
+      fetch(COURSE_APP + '/api/public/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      })
+        .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+        .then(function (res) {
+          if (res.ok) {
+            form.hidden = true;
+            done.hidden = false;
+            return;
+          }
+          showError(res.body && res.body.error ? res.body.error : 'Something went wrong. Please try again.');
+        })
+        .catch(function () {
+          showError('Could not reach the course server. Please try again in a moment.');
+        })
+        .finally(function () {
+          btn.disabled = false;
+          btn.textContent = 'Create my account';
+        });
+    });
+  })();
+</script>

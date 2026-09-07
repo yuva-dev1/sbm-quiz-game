@@ -1,24 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { LoaderCircle } from 'lucide-react';
 import { api } from './api.js';
 
 const SessionContext = createContext(null);
 export const useSession = () => useContext(SessionContext);
 
+/** Tracks only the host passcode session. Students have no session here —
+ *  their identity rides in from the Squarespace embed as a `sid` param. */
 export function SessionProvider({ children }) {
-  const [state, setState] = useState({ loading: true, student: null, host: false });
+  const [state, setState] = useState({ loading: true, host: false });
 
   const refresh = useCallback(async () => {
-    const [student, host] = await Promise.all([
-      api.get('/api/auth/session').catch(() => ({ authenticated: false })),
-      api.get('/api/host/session').catch(() => ({ authenticated: false }))
-    ]);
-    setState({
-      loading: false,
-      student: student.authenticated ? student.email : null,
-      host: Boolean(host.authenticated)
-    });
+    const host = await api.get('/api/host/session').catch(() => ({ authenticated: false }));
+    setState({ loading: false, host: Boolean(host.authenticated) });
   }, []);
 
   useEffect(() => {
@@ -34,14 +29,6 @@ export function FullPageLoader() {
       <LoaderCircle className="spin" size={28} />
     </div>
   );
-}
-
-export function RequireStudent({ children }) {
-  const { loading, student } = useSession();
-  const location = useLocation();
-  if (loading) return <FullPageLoader />;
-  if (!student) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
-  return children;
 }
 
 export function RequireHost({ children }) {

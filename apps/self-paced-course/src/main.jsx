@@ -1,37 +1,29 @@
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './styles.css';
-import { FullPageLoader, RequireHost, RequireStudent, SessionProvider, useSession } from './session.jsx';
-import AuthGate from './auth.jsx';
-import CourseHome from './student/CourseHome.jsx';
-import WeekPage from './student/WeekPage.jsx';
-import TakeQuiz from './student/TakeQuiz.jsx';
-import Results from './student/Results.jsx';
+import { FullPageLoader, RequireHost, SessionProvider, useSession } from './session.jsx';
+import TakeQuiz from './TakeQuiz.jsx';
 import HostLogin from './host/HostLogin.jsx';
 import HostWeeks from './host/HostWeeks.jsx';
 import HostWeekEditor from './host/HostWeekEditor.jsx';
 import HostScores from './host/HostScores.jsx';
 
 function App() {
-  const { loading, student, host } = useSession();
+  const { loading, host } = useSession();
   if (loading) return <FullPageLoader />;
 
   return (
     <Routes>
-      <Route path="/login" element={student ? <Navigate to="/" replace /> : <AuthGate />} />
-      <Route path="/reset" element={<AuthGate initialView="reset" />} />
-
-      <Route path="/" element={<RequireStudent><CourseHome /></RequireStudent>} />
-      <Route path="/week/:n" element={<RequireStudent><WeekPage /></RequireStudent>} />
-      <Route path="/week/:n/quiz" element={<RequireStudent><TakeQuiz /></RequireStudent>} />
-      <Route path="/results" element={<RequireStudent><Results /></RequireStudent>} />
+      {/* Student-facing quiz — embedded from the Squarespace course page,
+          identified by the ?sid= param. No login. */}
+      <Route path="/q/:n" element={<TakeQuiz />} />
 
       <Route path="/host/login" element={host ? <Navigate to="/host" replace /> : <HostLogin />} />
       <Route path="/host" element={<RequireHost><HostWeeks /></RequireHost>} />
       <Route path="/host/week/:n" element={<RequireHost><HostWeekEditor /></RequireHost>} />
       <Route path="/host/scores" element={<RequireHost><HostScores /></RequireHost>} />
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/host/login" replace />} />
     </Routes>
   );
 }

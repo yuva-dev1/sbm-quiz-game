@@ -1,29 +1,20 @@
 import crypto from 'node:crypto';
 
 /**
- * Two independent signed cookies:
- *   - sp_student : payload is the student's email (their identity everywhere)
- *   - sp_host    : payload is the literal "host" (shared-passcode gate)
+ * One signed cookie, `sp_host` — payload is the literal "host", the
+ * shared-passcode gate for the /host area. Same `payload.expiresAt.hmac`
+ * shape and timing-safe verify as the Kahoot app's hostAuth cookie, scoped
+ * to this app's SELF_PACED_SESSION_SECRET.
  *
- * Same `payload.expiresAt.hmac` shape and timing-safe verify as
- * apps/self-study/server/session.js and the Kahoot app's hostAuth cookie,
- * scoped to this app's SELF_PACED_SESSION_SECRET.
+ * Students have no cookie here — their identity comes from the Squarespace
+ * member session (see server/squarespace.js), passed in as a `sid` param.
  */
 
-const STUDENT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const HOST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const STUDENT_COOKIE = 'sp_student';
 const HOST_COOKIE = 'sp_host';
 
 function sign(value, secret) {
   return crypto.createHmac('sha256', secret).update(value).digest('base64url');
-}
-
-function buildCookie(name, payloadValue, secret, maxAgeMs) {
-  const expiresAt = Date.now() + maxAgeMs;
-  const payload = `${payloadValue}.${expiresAt}`;
-  const value = `${payload}.${sign(payload, secret)}`;
-  return `${name}=${encodeURIComponent(value)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(maxAgeMs / 1000)}`;
 }
 
 function clearCookie(name) {
@@ -42,68 +33,37 @@ function parseCookies(cookieHeader = '') {
   return cookies;
 }
 
-/** Returns the signed payload string, or null if the cookie is missing/invalid/expired. */
-function readSignedCookie(req, name, secret) {
-  if (!secret) return null;
-  const value = parseCookies(req.headers.cookie)[name];
-  if (!value) return null;
-
-  const lastDot = value.lastIndexOf('.');
-  if (lastDot === -1) return null;
-  const payload = value.slice(0, lastDot);
-  const signature = value.slice(lastDot + 1);
-  const separatorIndex = payload.lastIndexOf('.');
-  if (separatorIndex === -1) return null;
-  const payloadValue = payload.slice(0, separatorIndex);
-  const expiresAtRaw = payload.slice(separatorIndex + 1);
-  if (!payloadValue || !expiresAtRaw || !signature) return null;
-
-  const expected = sign(payload, secret);
-  const signatureBuf = Buffer.from(signature);
-  const expectedBuf = Buffer.from(expected);
-  if (signatureBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(signatureBuf, expectedBuf)) {
-    return null;
-  }
-  if (Date.now() > Number(expiresAtRaw)) return null;
-  return payloadValue;
-}
-
-export function createStudentCookie(email, secret) {
-  return buildCookie(STUDENT_COOKIE, email, secret, STUDENT_MAX_AGE_MS);
-}
-
 export function createHostCookie(secret) {
-  return buildCookie(HOST_COOKIE, 'host', secret, HOST_MAX_AGE_MS);
-}
-
-export function clearStudentCookie() {
-  return clearCookie(STUDENT_COOKIE);
+  const expiresAt = Date.now() + HOST_MAX_AGE_MS;
+  const payload = `host.${expiresAt}`;
+  const value = `${payload}.${sign(payload, secret)}`;
+  return `${HOST_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(HOST_MAX_AGE_MS / 1000)}`;
 }
 
 export function clearHostCookie() {
   return clearCookie(HOST_COOKIE);
 }
 
-/** Authenticated student email, or null. */
-export function readStudent(req, secret) {
-  return readSignedCookie(req, STUDENT_COOKIE, secret);
-}
-
-/** True when a valid host cookie is present. A student cookie never satisfies this. */
+/** True when a valid host cookie is present. */
 export function readHost(req, secret) {
-  return readSignedCookie(req, HOST_COOKIE, secret) === 'host';
-}
+  if (!secret) return false;
+  const value = parseCookies(req.headers.cookie)[HOST_COOKIE];
+  if (!value) return false;
 
-export function requireStudent(secret) {
-  return (req, res, next) => {
-    const email = readStudent(req, secret);
-    if (!email) {
-      res.status(401).json({ error: 'Please log in to continue.' });
-      return;
-    }
-    req.email = email;
-    next();
-  };
+  const lastDot = value.lastIndexOf('.');
+  if (lastDot === -1) return false;
+  const payload = value.slice(0, lastDot);
+  const signature = value.slice(lastDot + 1);
+  const [role, expiresAtRaw] = payload.split('.');
+  if (role !== 'host' || !expiresAtRaw || !signature) return false;
+
+  const expected = sign(payload, secret);
+  const signatureBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expected);
+  if (signatureBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(signatureBuf, expectedBuf)) {
+    return false;
+  }
+  return Date.now() <= Number(expiresAtRaw);
 }
 
 export function requireHost(secret) {

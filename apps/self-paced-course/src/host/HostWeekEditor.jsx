@@ -4,12 +4,10 @@ import { ArrowLeft, LoaderCircle, Plus, Sparkles, Trash2 } from 'lucide-react';
 import Layout from '../Layout.jsx';
 import { api } from '../api.js';
 import { generateWithProgress } from '../generateClient.js';
-import { LessonVideo } from '../video.jsx';
 
 const DIFFICULTY_MAP = { Mixed: 'mixed', Foundations: 'beginner', Discussion: 'intermediate', Challenge: 'advanced' };
 const COUNTS = [5, 8, 10, 15, 20, 25, 30, 35];
 
-const blankLesson = () => ({ title: '', description: '', videoUrl: '', pageUrl: '' });
 const blankQuestion = () => ({
   id: crypto.randomUUID(),
   type: 'MULTIPLE_CHOICE',
@@ -39,8 +37,6 @@ export default function HostWeekEditor() {
   const [savedNote, setSavedNote] = useState('');
 
   const [title, setTitle] = useState('');
-  const [summary, setSummary] = useState('');
-  const [lessons, setLessons] = useState([blankLesson()]);
   const [opensAt, setOpensAt] = useState('');
   const [closesAt, setClosesAt] = useState('');
   const [questions, setQuestions] = useState([]);
@@ -66,8 +62,6 @@ export default function HostWeekEditor() {
         const existing = (data.weeks || []).find((w) => w.weekNumber === weekNumber);
         if (existing) {
           setTitle(existing.title);
-          setSummary(existing.summary || '');
-          setLessons(existing.lessons?.length ? existing.lessons : [blankLesson()]);
           setQuestions(existing.quiz || []);
           setOpensAt(toLocalInput(existing.opensAt));
           setClosesAt(toLocalInput(existing.closesAt));
@@ -117,15 +111,13 @@ export default function HostWeekEditor() {
     setSaveError('');
     setSavedNote('');
     if (!title.trim()) {
-      setSaveError('A week title is required.');
+      setSaveError('A quiz title is required.');
       return;
     }
     setSaving(true);
     try {
       await api.post(`/api/host/weeks/${weekNumber}`, {
         title: title.trim(),
-        summary: summary.trim(),
-        lessons: lessons.filter((l) => l.title || l.videoUrl || l.pageUrl),
         quiz: questions,
         opensAt: opensAt ? new Date(opensAt).toISOString() : null,
         closesAt: closesAt ? new Date(closesAt).toISOString() : null
@@ -140,26 +132,22 @@ export default function HostWeekEditor() {
 
   if (loading) {
     return (
-      <Layout variant="host">
+      <Layout>
         <div className="center-load"><LoaderCircle className="spin" size={24} /></div>
       </Layout>
     );
   }
 
   return (
-    <Layout variant="host">
-      <Link className="linkbtn" to="/host"><ArrowLeft size={14} /> All weeks</Link>
-      <h1 style={{ marginTop: 14 }}>Week {weekNumber}</h1>
+    <Layout>
+      <Link className="linkbtn" to="/host"><ArrowLeft size={14} /> All quizzes</Link>
+      <h1 style={{ marginTop: 14 }}>Week {weekNumber} quiz</h1>
       {pageError && <p className="error">{pageError}</p>}
 
       <div className="card">
         <label className="field">
           <span>Title</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Sanatana Dharma & the Shastras" />
-        </label>
-        <label className="field">
-          <span>Summary</span>
-          <textarea value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="One or two lines shown on the course home." />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Week 1 Assessment Quiz" />
         </label>
         <div className="row">
           <label className="field">
@@ -173,43 +161,7 @@ export default function HostWeekEditor() {
         </div>
       </div>
 
-      <h2 style={{ marginTop: 26, fontSize: 24 }}>Lessons</h2>
-      {lessons.map((lesson, i) => (
-        <div className="card" key={i}>
-          <label className="field">
-            <span>Lesson {i + 1} title</span>
-            <input value={lesson.title} onChange={(e) => updateItem(setLessons, i, { title: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Video URL</span>
-            <input value={lesson.videoUrl} onChange={(e) => updateItem(setLessons, i, { videoUrl: e.target.value })} placeholder="YouTube, Vimeo, or a direct video link" />
-          </label>
-          {lesson.videoUrl && (
-            <div className="field">
-              <span>Preview — this is exactly what students see</span>
-              <LessonVideo url={lesson.videoUrl} title={lesson.title} />
-            </div>
-          )}
-          <label className="field">
-            <span>Course-site page URL (optional)</span>
-            <input value={lesson.pageUrl} onChange={(e) => updateItem(setLessons, i, { pageUrl: e.target.value })} placeholder="https://www.srimadbhagavatamcourse.org/... — shown to students as a fallback if the embed is blocked" />
-          </label>
-          <label className="field">
-            <span>Description (optional)</span>
-            <textarea value={lesson.description} onChange={(e) => updateItem(setLessons, i, { description: e.target.value })} />
-          </label>
-          {lessons.length > 1 && (
-            <button className="btn ghost small" type="button" onClick={() => setLessons((cur) => cur.filter((_, idx) => idx !== i))}>
-              <Trash2 size={13} /> Remove lesson
-            </button>
-          )}
-        </div>
-      ))}
-      <button className="btn secondary small" type="button" onClick={() => setLessons((cur) => [...cur, blankLesson()])}>
-        <Plus size={14} /> Add lesson
-      </button>
-
-      <h2 style={{ marginTop: 26, fontSize: 24 }}>Quiz</h2>
+      <h2 style={{ marginTop: 26, fontSize: 24 }}>Questions</h2>
       <div className="card">
         <p className="eyebrow">Generate from the class notes</p>
         <div className="row">
@@ -287,9 +239,9 @@ export default function HostWeekEditor() {
         <Plus size={14} /> Add blank question
       </button>
 
-      <div style={{ marginTop: 28, display: 'flex', gap: 12, alignItems: 'center' }}>
+      <div style={{ marginTop: 28, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <button className="btn" type="button" onClick={save} disabled={saving}>
-          {saving ? <LoaderCircle className="spin" size={16} /> : null} Save week
+          {saving ? <LoaderCircle className="spin" size={16} /> : null} Save quiz
         </button>
         {savedNote && <span className="info" style={{ margin: 0 }}>{savedNote}</span>}
         {saveError && <span className="error" style={{ margin: 0 }}>{saveError}</span>}

@@ -1,0 +1,55 @@
+<!--
+  Srimad Bhagavatam Self-Paced Course — weekly quiz embed.
+  Paste this whole block into a Squarespace Code Block on the "Week N Quiz" lesson.
+  Set WEEK and COURSE_APP below.
+-->
+<div id="sbm-quiz"></div>
+
+<style>
+  #sbm-quiz { max-width: 760px; margin: 0 auto; }
+  #sbm-quiz iframe { width: 100%; border: 0; display: block; min-height: 320px; transition: height .15s ease; }
+  #sbm-quiz .sbm-note {
+    max-width: 480px; margin: 24px auto; padding: 16px 18px; border-radius: 10px;
+    background: #f4f2ec; color: #5d6270; font-size: 15px; text-align: center;
+  }
+</style>
+
+<script>
+  (function () {
+    var WEEK = 1;
+    var COURSE_APP = 'https://self-paced.srimadbhagavatamcourse.org';
+
+    var mount = document.getElementById('sbm-quiz');
+
+    function getCookie(name) {
+      var m = document.cookie.split(';').map(function (c) { return c.trim(); })
+        .find(function (c) { return c.indexOf(name + '=') === 0; });
+      return m ? decodeURIComponent(m.slice(name.length + 1)) : null;
+    }
+
+    var info = {};
+    try { info = JSON.parse(getCookie('SiteUserInfo') || '{}'); } catch (e) {}
+
+    if (!info.authenticated || !info.siteUserId) {
+      mount.innerHTML = '<div class="sbm-note">Please sign in to the course to take this quiz.</div>';
+      return;
+    }
+
+    var src = COURSE_APP + '/q/' + WEEK
+      + '?sid=' + encodeURIComponent(info.siteUserId)
+      + '&back=' + encodeURIComponent(window.location.href);
+
+    var iframe = document.createElement('iframe');
+    iframe.src = src;
+    iframe.title = 'Week ' + WEEK + ' quiz';
+    iframe.setAttribute('scrolling', 'no');
+    mount.appendChild(iframe);
+
+    window.addEventListener('message', function (e) {
+      if (COURSE_APP.indexOf(e.origin) !== 0) return;
+      if (e.data && e.data.type === 'sbm-quiz-height' && e.data.height) {
+        iframe.style.height = (e.data.height + 24) + 'px';
+      }
+    });
+  })();
+</script>

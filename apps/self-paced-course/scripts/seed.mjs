@@ -1,9 +1,10 @@
 /**
  * One-off seeder for the Weeks tab. Reads scripts/weeks-seed.json and calls
  * the deployed Apps Script `upsertWeek` action for each week (idempotent — a
- * re-run updates title/summary/lessons on existing rows, never duplicates,
- * and never touches Status/ResponsesOpen). Quizzes are left empty; the host
- * builds + opens each one.
+ * re-run updates the title on existing rows, never duplicates, and never
+ * touches Status/ResponsesOpen or an already-built QuizJSON... except: this
+ * script sends quiz: [], so re-running WILL blank a week's questions. Only
+ * run it before the host has built quizzes.). The host builds + opens each.
  *
  * Usage:
  *   SELF_PACED_SHEETS_ENDPOINT='{"url":"https://script.google.com/.../exec","apiKey":"..."}' \
@@ -35,8 +36,6 @@ for (const week of weeks) {
     week: {
       weekNumber: week.weekNumber,
       title: week.title,
-      summary: week.summary,
-      lessons: week.lessons,
       quiz: [],
       opensAt: null,
       closesAt: null

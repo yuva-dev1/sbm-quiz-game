@@ -1,6 +1,6 @@
 /**
  * Talks to the Google Apps Script web app that backs this app's Sheet
- * (Users / Weeks / Attempts tabs). URL + shared apiKey come from the single
+ * (Members / Weeks / Attempts tabs). URL + shared apiKey come from the single
  * JSON secret SELF_PACED_SHEETS_ENDPOINT, mirroring how apps/self-study
  * handles SELF_STUDY_SHEETS_ENDPOINT.
  *
@@ -34,22 +34,15 @@ async function callSheetsScript(body) {
     .catch(() => ({ ok: false, error: 'The course sheet returned an invalid response.' }));
 }
 
-// ---- Accounts ----
+// ---- Members (identity cached from the Squarespace Profiles API) ----
 
-export async function createAccount(firstName, lastName, email, passwordHash) {
-  return callSheetsScript({ action: 'register', firstName, lastName, email, passwordHash });
+/** @returns { ok, member: { siteUserId, email, firstName, lastName } | null } */
+export async function getMember(siteUserId) {
+  return callSheetsScript({ action: 'getMember', siteUserId });
 }
 
-export async function findAccount(email) {
-  return callSheetsScript({ action: 'login', email });
-}
-
-export async function requestPasswordReset(email) {
-  return callSheetsScript({ action: 'requestPasswordReset', email });
-}
-
-export async function resetPassword(email, token, passwordHash) {
-  return callSheetsScript({ action: 'resetPassword', email, token, passwordHash });
+export async function upsertMember(member) {
+  return callSheetsScript({ action: 'upsertMember', member });
 }
 
 // ---- Weeks ----
@@ -57,11 +50,6 @@ export async function resetPassword(email, token, passwordHash) {
 /** All weeks incl. drafts and correctChoices — host only. */
 export async function listWeeksForHost() {
   return callSheetsScript({ action: 'listWeeks', includeUnpublished: true });
-}
-
-/** Published weeks only — the student-facing course. */
-export async function listPublishedWeeks() {
-  return callSheetsScript({ action: 'listWeeks', includeUnpublished: false });
 }
 
 export async function upsertWeek(week) {
@@ -83,11 +71,12 @@ export async function saveAttempt(attempt) {
   return callSheetsScript({ action: 'saveAttempt', attempt });
 }
 
-export async function listAttempts(email) {
-  return callSheetsScript({ action: 'listAttempts', email });
+/** This member's attempts. */
+export async function listAttempts(siteUserId) {
+  return callSheetsScript({ action: 'listAttempts', siteUserId });
 }
 
-/** Every attempt across all students — host scores dashboard. */
+/** Every attempt across all members — host scores dashboard. */
 export async function listAllAttempts() {
   return callSheetsScript({ action: 'listAllAttempts' });
 }

@@ -14,7 +14,7 @@ export default function HostScores() {
   }, []);
 
   return (
-    <Layout variant="host">
+    <Layout>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
         <div>
           <p className="eyebrow">Course host</p>
@@ -39,8 +39,8 @@ export default function HostScores() {
                 </tr>
               </thead>
               <tbody>
-                {state.students.map((s) => (
-                  <tr key={s.email}>
+                {state.students.map((s, i) => (
+                  <tr key={s.email || s.name || i}>
                     <td>
                       <div>{s.name || '—'}</div>
                       <div className="muted" style={{ fontSize: 12 }}>{s.email}</div>

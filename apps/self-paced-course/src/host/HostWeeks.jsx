@@ -33,11 +33,11 @@ export default function HostWeeks() {
   const nextWeekNumber = state.weeks.reduce((max, w) => Math.max(max, w.weekNumber), 0) + 1;
 
   return (
-    <Layout variant="host">
+    <Layout>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
         <div>
           <p className="eyebrow">Course host</p>
-          <h1>Weeks</h1>
+          <h1>Weekly quizzes</h1>
         </div>
         <Link className="btn" to={`/host/week/${nextWeekNumber}`}><Plus size={16} /> New week</Link>
       </div>
@@ -46,7 +46,7 @@ export default function HostWeeks() {
       {state.error && <p className="error" style={{ marginTop: 16 }}>{state.error}</p>}
 
       {!state.loading && state.weeks.length === 0 && !state.error && (
-        <p className="muted" style={{ marginTop: 16 }}>No weeks yet. Create the first one.</p>
+        <p className="muted" style={{ marginTop: 16 }}>No quizzes yet. Create the first one.</p>
       )}
 
       {state.weeks.map((week) => {
@@ -56,17 +56,16 @@ export default function HostWeeks() {
 
         let statusPill;
         if (!published) statusPill = { cls: 'closed', text: 'Draft' };
-        else if (!hasQuiz) statusPill = { cls: 'closed', text: 'Lesson only' };
-        else if (week.responsesOpen) statusPill = { cls: 'open', text: 'Quiz open' };
-        else statusPill = { cls: 'closed', text: 'Quiz closed' };
+        else if (!hasQuiz) statusPill = { cls: 'closed', text: 'No questions' };
+        else if (week.responsesOpen) statusPill = { cls: 'open', text: 'Open' };
+        else statusPill = { cls: 'closed', text: 'Closed' };
 
         return (
           <div className="card" key={week.weekNumber} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 240px' }}>
-              <span className="kicker">Week {week.weekNumber}</span>
+              <span className="kicker">Week {week.weekNumber}{published ? `  ·  /q/${week.weekNumber}` : ''}</span>
               <h2 style={{ fontSize: 22 }}>{week.title}</h2>
               <div className="meta">
-                <span>{week.lessons.length} lesson{week.lessons.length === 1 ? '' : 's'}</span>
                 <span>{week.quiz.length} question{week.quiz.length === 1 ? '' : 's'}</span>
                 <span className={`pill ${statusPill.cls}`}>{statusPill.text}</span>
               </div>
@@ -80,10 +79,10 @@ export default function HostWeeks() {
                 type="button"
                 onClick={() => act(week.weekNumber, 'responses', { open: !week.responsesOpen })}
                 disabled={spinning || !hasQuiz}
-                title={hasQuiz ? '' : 'Add a quiz first'}
+                title={hasQuiz ? '' : 'Add questions first'}
               >
                 {spinning ? <LoaderCircle className="spin" size={14} /> : week.responsesOpen ? <Lock size={14} /> : <LockOpen size={14} />}
-                {week.responsesOpen ? 'Close quiz' : 'Open quiz'}
+                {week.responsesOpen ? 'Close' : 'Open'}
               </button>
             )}
 

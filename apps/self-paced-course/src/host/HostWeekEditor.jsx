@@ -244,13 +244,38 @@ export default function HostWeekEditor() {
           {saving ? <LoaderCircle className="spin" size={16} /> : null} Save quiz
         </button>
         <a className="btn secondary" href={`/q/${weekNumber}?preview=1`} target="_blank" rel="noreferrer">
-          <Eye size={16} /> Preview (saved version)
+          <Eye size={16} /> Preview (latest saved version)
         </a>
         {savedNote && <span className="info" style={{ margin: 0 }}>{savedNote}</span>}
         {saveError && <span className="error" style={{ margin: 0 }}>{saveError}</span>}
         <button className="btn ghost" type="button" onClick={() => navigate('/host')}>Done</button>
       </div>
+
+      <PreviewLink weekNumber={weekNumber} />
     </Layout>
+  );
+}
+
+/** The shareable host-preview URL for this week — always renders whatever the
+ *  host last saved (there is one live quiz per week, not a version history). */
+function PreviewLink({ weekNumber }) {
+  const [copied, setCopied] = useState(false);
+  const url = `${window.location.origin}/q/${weekNumber}?preview=1`;
+  const copy = () => {
+    navigator.clipboard?.writeText(url).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {}
+    );
+  };
+  return (
+    <p className="muted" style={{ marginTop: 14, fontSize: 13, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span>Preview link (opens the latest saved quiz — sign in to <code>/host</code> first):</span>
+      <code style={{ background: 'var(--ground)', padding: '2px 6px', borderRadius: 6, wordBreak: 'break-all' }}>{url}</code>
+      <button type="button" className="linkbtn" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+    </p>
   );
 }
 

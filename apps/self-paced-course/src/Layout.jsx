@@ -24,6 +24,7 @@ export default function Layout({ children }) {
         <nav>
           <NavLink to="/host" end>Quizzes</NavLink>
           <NavLink to="/host/scores">Scores</NavLink>
+          <NavLink to="/host/attempts">Attempts</NavLink>
           <button type="button" className="linkbtn" onClick={logout}>Log out</button>
         </nav>
       </header>

@@ -46,9 +46,14 @@
       return;
     }
 
+    // "Back to the course" should land on the course overview page, not this
+    // individual lesson. Derive it from the current path (…/english-6month-selfpaced).
+    var m = window.location.pathname.match(/^(.*\/english-6month-selfpaced)(\/|$)/);
+    var courseHome = window.location.origin + (m ? m[1] : '/english-6month-selfpaced');
+
     var src = COURSE_APP + '/q/' + WEEK
       + '?sid=' + encodeURIComponent(info.siteUserId)
-      + '&back=' + encodeURIComponent(window.location.href);
+      + '&back=' + encodeURIComponent(courseHome);
 
     var iframe = document.createElement('iframe');
     iframe.src = src;

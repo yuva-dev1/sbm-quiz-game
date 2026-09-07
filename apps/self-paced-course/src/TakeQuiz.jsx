@@ -4,6 +4,26 @@ import { ArrowRight, CheckCircle2, ClipboardCheck, LoaderCircle, RotateCcw } fro
 import { api } from './api.js';
 import QuestionCard from './QuestionCard.jsx';
 
+/** The course landing page — where "Back to the course" always lands. */
+const COURSE_HOME = 'https://www.srimadbhagavatamcourse.org/english-6month-selfpaced';
+
+/**
+ * "Back to the course" should return the student to the course overview, not
+ * the individual lesson page. If the embedding page handed us a deep lesson
+ * URL in ?back=, trim it back to the course root; otherwise use COURSE_HOME.
+ */
+function courseHomeUrl(back) {
+  const marker = '/english-6month-selfpaced';
+  try {
+    const url = new URL(back);
+    const i = url.pathname.indexOf(marker);
+    if (i !== -1) return `${url.origin}${url.pathname.slice(0, i + marker.length)}`;
+  } catch {
+    // ?back= was empty or not an absolute URL — fall through to the default.
+  }
+  return COURSE_HOME;
+}
+
 /**
  * The quiz, embedded in an <iframe> on the Squarespace course page. The
  * member's identity comes in as ?sid=<Squarespace siteUserId>; ?back=<url>
@@ -13,7 +33,7 @@ export default function TakeQuiz() {
   const { n } = useParams();
   const [params] = useSearchParams();
   const sid = params.get('sid') || '';
-  const back = params.get('back') || '';
+  const backHref = courseHomeUrl(params.get('back') || '');
   const preview = params.get('preview') === '1';
 
   const [state, setState] = useState({ loading: true, error: '', data: null });
@@ -78,7 +98,7 @@ export default function TakeQuiz() {
     );
   }
 
-  const { firstName, bestPercentage, week } = state.data;
+  const { firstName, bestPercentage, lastPercentage, attemptCount, week } = state.data;
 
   const submit = async () => {
     const unanswered = week.questions.filter((q) => !(selected[q.id]?.length)).length;
@@ -122,8 +142,13 @@ export default function TakeQuiz() {
           <span className="muted">{result.correctCount} of {result.totalQuestions} correct</span>
         </div>
       )}
-      {!result && bestPercentage != null && (
-        <p className="muted" style={{ marginTop: 4 }}>Your best so far: {bestPercentage}%.</p>
+      {!result && attemptCount > 0 && (
+        <p className="muted" style={{ marginTop: 4 }}>
+          You&rsquo;ve taken this quiz {attemptCount} time{attemptCount === 1 ? '' : 's'}. Best{' '}
+          {bestPercentage}%
+          {lastPercentage != null && lastPercentage !== bestPercentage ? `, last ${lastPercentage}%` : ''}.
+          {week.open ? ' You can retake it below.' : ''}
+        </p>
       )}
 
       {!week.open && !result && !preview && (
@@ -156,8 +181,8 @@ export default function TakeQuiz() {
                 <RotateCcw size={16} /> Retake
               </button>
             )}
-            {back && (
-              <a className="btn" href={back} target="_top">
+            {!preview && (
+              <a className="btn" href={backHref} target="_top">
                 Back to the course <ArrowRight size={16} />
               </a>
             )}
@@ -167,8 +192,8 @@ export default function TakeQuiz() {
             {submitting ? <LoaderCircle className="spin" size={16} /> : <ClipboardCheck size={16} />} Submit quiz
           </button>
         ) : (
-          back && (
-            <a className="btn secondary" href={back} target="_top">
+          !preview && (
+            <a className="btn secondary" href={backHref} target="_top">
               <CheckCircle2 size={16} /> Back to the course
             </a>
           )

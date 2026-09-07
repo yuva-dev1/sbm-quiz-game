@@ -1,7 +1,11 @@
 <!--
   Srimad Bhagavatam Self-Paced Course — weekly quiz embed.
   Paste this whole block into a Squarespace Code Block on the "Week N Quiz" lesson.
-  Set WEEK and COURSE_APP below.
+  Set WEEK below (1, 2, ...). Update COURSE_APP once the quiz. subdomain is live.
+
+  Note: Squarespace does not run Code Blocks in the page editor's preview —
+  you'll see a placeholder there. Verify on the published page while signed in
+  as a course member.
 -->
 <div id="sbm-quiz"></div>
 
@@ -17,7 +21,8 @@
 <script>
   (function () {
     var WEEK = 1;
-    var COURSE_APP = 'https://quiz.srimadbhagavatamcourse.org';
+    // Once the DNS record is live, use: https://quiz.srimadbhagavatamcourse.org
+    var COURSE_APP = 'https://bhagavatham-self-paced-course-876193044983.us-central1.run.app';
 
     var mount = document.getElementById('sbm-quiz');
 
@@ -31,7 +36,13 @@
     try { info = JSON.parse(getCookie('SiteUserInfo') || '{}'); } catch (e) {}
 
     if (!info.authenticated || !info.siteUserId) {
-      mount.innerHTML = '<div class="sbm-note">Please sign in to the course to take this quiz.</div>';
+      // In the Squarespace editor the page is rendered inside a frame and has
+      // no member session — show a labelled placeholder there, and the real
+      // sign-in prompt to a logged-out visitor on the live page.
+      var inEditor = window.self !== window.top;
+      mount.innerHTML = '<div class="sbm-note">' + (inEditor
+        ? 'Week ' + WEEK + ' quiz — renders here for signed-in students on the published page.'
+        : 'Please sign in to the course to take this quiz.') + '</div>';
       return;
     }
 

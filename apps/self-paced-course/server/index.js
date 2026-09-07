@@ -122,50 +122,60 @@ app.get('/api/host/session', (req, res) => {
 
 app.get('/api/q/:n', async (req, res) => {
   const weekNumber = Number(req.params.n);
-  const sid = String(req.query.sid || '').trim();
   if (!Number.isInteger(weekNumber) || weekNumber < 1) return badRequest(res, 'Unknown quiz.');
-  if (!sid) {
-    res.status(401).json({ error: 'Open this quiz from the course page so we know who you are.' });
-    return;
-  }
 
-  let member;
-  try {
-    member = await resolveMember(sid);
-  } catch (error) {
-    console.error('resolveMember error:', error);
-    res.status(502).json({ error: 'Could not verify your course sign-in. Please try again.' });
-    return;
-  }
-  if (!member) {
-    res.status(403).json({ error: 'We could not find your course account. Make sure you are signed in to the course site.' });
-    return;
+  // Host preview: signed-in host opening /q/:n?preview=1 — no member, works on
+  // a draft/closed quiz, nothing is saved.
+  const preview = req.query.preview === '1' && readHost(req, SESSION_SECRET);
+
+  let member = null;
+  if (!preview) {
+    const sid = String(req.query.sid || '').trim();
+    if (!sid) {
+      res.status(401).json({ error: 'Open this quiz from the course page so we know who you are.' });
+      return;
+    }
+    try {
+      member = await resolveMember(sid);
+    } catch (error) {
+      console.error('resolveMember error:', error);
+      res.status(502).json({ error: 'Could not verify your course sign-in. Please try again.' });
+      return;
+    }
+    if (!member) {
+      res.status(403).json({ error: 'We could not find your course account. Make sure you are signed in to the course site.' });
+      return;
+    }
   }
 
   try {
     const result = await getWeek(weekNumber);
     if (!result.ok || !result.week) {
-      res.status(404).json({ error: 'This quiz is not available yet.' });
+      res.status(404).json({ error: preview ? 'No quiz saved for this week yet.' : 'This quiz is not available yet.' });
       return;
     }
     const week = hydrateWeek(result.week);
-    if (week.status !== 'PUBLISHED' || week.quiz.length === 0) {
+    if (!preview && (week.status !== 'PUBLISHED' || week.quiz.length === 0)) {
       res.status(404).json({ error: 'This quiz is not available yet.' });
       return;
     }
 
-    const history = await listAttempts(sid).catch(() => ({ ok: false }));
-    const forWeek = (history.ok ? history.attempts || [] : []).filter((a) => Number(a.weekNumber) === weekNumber);
-    const bestPercentage = forWeek.length ? Math.max(...forWeek.map((a) => Number(a.percentage) || 0)) : null;
+    let bestPercentage = null;
+    if (!preview) {
+      const history = await listAttempts(member.siteUserId).catch(() => ({ ok: false }));
+      const forWeek = (history.ok ? history.attempts || [] : []).filter((a) => Number(a.weekNumber) === weekNumber);
+      bestPercentage = forWeek.length ? Math.max(...forWeek.map((a) => Number(a.percentage) || 0)) : null;
+    }
 
     res.json({
-      firstName: member.firstName || '',
+      firstName: member ? member.firstName || '' : '',
       bestPercentage,
+      preview,
       week: {
         weekNumber: week.weekNumber,
         title: week.title,
         windowState: describeWindowState(week),
-        open: isAcceptingResponses(week),
+        open: preview ? true : isAcceptingResponses(week),
         questions: week.quiz.map(toStudentQuestion)
       }
     });
@@ -177,11 +187,28 @@ app.get('/api/q/:n', async (req, res) => {
 
 app.post('/api/q/:n/submit', async (req, res) => {
   const weekNumber = Number(req.params.n);
-  const sid = String(req.body?.sid || '').trim();
   if (!Number.isInteger(weekNumber) || weekNumber < 1) return badRequest(res, 'Unknown quiz.');
-  if (!sid) {
-    res.status(401).json({ error: 'Open this quiz from the course page.' });
-    return;
+
+  const preview = req.body?.preview === true && readHost(req, SESSION_SECRET);
+
+  let member = null;
+  if (!preview) {
+    const sid = String(req.body?.sid || '').trim();
+    if (!sid) {
+      res.status(401).json({ error: 'Open this quiz from the course page.' });
+      return;
+    }
+    try {
+      member = await resolveMember(sid);
+    } catch (error) {
+      console.error('resolveMember error:', error);
+      res.status(502).json({ error: 'Could not verify your course sign-in. Please try again.' });
+      return;
+    }
+    if (!member) {
+      res.status(403).json({ error: 'We could not find your course account.' });
+      return;
+    }
   }
 
   const selectedRaw = req.body?.selected;
@@ -194,19 +221,6 @@ app.post('/api/q/:n/submit', async (req, res) => {
     }
   }
 
-  let member;
-  try {
-    member = await resolveMember(sid);
-  } catch (error) {
-    console.error('resolveMember error:', error);
-    res.status(502).json({ error: 'Could not verify your course sign-in. Please try again.' });
-    return;
-  }
-  if (!member) {
-    res.status(403).json({ error: 'We could not find your course account.' });
-    return;
-  }
-
   try {
     const result = await getWeek(weekNumber);
     if (!result.ok || !result.week) {
@@ -214,7 +228,7 @@ app.post('/api/q/:n/submit', async (req, res) => {
       return;
     }
     const week = hydrateWeek(result.week);
-    if (!isAcceptingResponses(week)) {
+    if (!preview && !isAcceptingResponses(week)) {
       res.status(403).json({ error: 'This quiz is not currently accepting responses.' });
       return;
     }
@@ -226,9 +240,9 @@ app.post('/api/q/:n/submit', async (req, res) => {
     const graded = gradeQuiz(week.quiz, selectedByQuestionId);
     const attempt = {
       id: crypto.randomUUID(),
-      siteUserId: member.siteUserId,
-      email: member.email,
-      name: `${member.firstName} ${member.lastName}`.trim(),
+      siteUserId: member ? member.siteUserId : 'preview',
+      email: member ? member.email : '',
+      name: member ? `${member.firstName} ${member.lastName}`.trim() : 'Preview',
       weekNumber,
       submittedAt: new Date().toISOString(),
       correctCount: graded.correctCount,
@@ -236,6 +250,12 @@ app.post('/api/q/:n/submit', async (req, res) => {
       percentage: graded.percentage,
       answers: graded.answers
     };
+
+    if (preview) {
+      res.status(200).json({ attempt: { ...attempt, preview: true } });
+      return;
+    }
+
     const saved = await saveAttempt(attempt);
     if (!saved.ok) {
       res.status(502).json({ error: saved.error || 'Could not save this attempt.' });

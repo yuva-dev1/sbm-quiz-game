@@ -367,8 +367,15 @@ export function PlayerLobby({
               : disabled && !mySelected
                 ? "opacity-40"
                 : "";
-            // Neutral (never red/green) pre-lock "you tapped this" affordance.
-            const selectedPreLockClass = mySelected && !isRevealed ? "ring-4 ring-white scale-105" : "";
+            // Pre-lock "you picked this" affordance — a bright gold halo
+            // (never red/green: those are reserved for the reveal below).
+            // Multi-select tiles are NOT dimmed while you're still choosing,
+            // so this ring is the only signal of which tiles you picked
+            // until the answer locks — a plain white ring was too faint
+            // against the tile colours to read at a glance (QA feedback).
+            const selectedPreLockClass = mySelected && !isRevealed
+              ? "ring-4 ring-gold ring-offset-2 ring-offset-paper scale-105"
+              : "";
             // Green/red are reserved for exactly this moment — the answer
             // reveal — and nowhere else on this screen. A solid fill of the
             // whole tile, not just a ring, per QA feedback.

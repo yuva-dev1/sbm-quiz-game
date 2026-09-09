@@ -15,9 +15,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const quiz = quizSnap.data()!;
 
-  const type = body?.type === "TRUE_FALSE" || body?.type === "MULTIPLE_CHOICE" ? body.type : null;
+  const type =
+    body?.type === "TRUE_FALSE" || body?.type === "MULTIPLE_CHOICE" || body?.type === "MULTI_SELECT"
+      ? (body.type as "TRUE_FALSE" | "MULTIPLE_CHOICE" | "MULTI_SELECT")
+      : null;
   if (!type) {
-    return Response.json({ error: "type must be MULTIPLE_CHOICE or TRUE_FALSE." }, { status: 400 });
+    return Response.json({ error: "type must be MULTIPLE_CHOICE, TRUE_FALSE, or MULTI_SELECT." }, { status: 400 });
   }
 
   const questionText = typeof body?.question === "string" ? body.question.trim() : "";
@@ -44,9 +47,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const correctChoices = [
     ...new Set(rawCorrectChoices.filter((choice): choice is string => typeof choice === "string")),
   ];
-  if (correctChoices.length !== 1 || !correctChoices.every((choice) => choices.includes(choice))) {
+  // MULTI_SELECT needs at least two correct choices (and allows up to all of
+  // them); everything else takes exactly one. Mirrors the PATCH handler.
+  const minCorrect = type === "MULTI_SELECT" ? 2 : 1;
+  const maxCorrect = type === "MULTI_SELECT" ? choices.length : 1;
+  if (
+    correctChoices.length < minCorrect ||
+    correctChoices.length > maxCorrect ||
+    !correctChoices.every((choice) => choices.includes(choice))
+  ) {
     return Response.json(
-      { error: "correctChoices must contain exactly one of the question's choices." },
+      {
+        error:
+          type === "MULTI_SELECT"
+            ? "correctChoices must list at least two of the question's choices."
+            : "correctChoices must contain exactly one of the question's choices.",
+      },
       { status: 400 }
     );
   }

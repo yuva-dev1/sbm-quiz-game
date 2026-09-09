@@ -82,6 +82,18 @@ bearer token (`GENERATE_QUIZ_API_KEY`), no DB persistence. It streams
 `Accept: text/event-stream`, otherwise it awaits generation and returns
 plain JSON.
 
+Hosts can also **upload** an existing file (`/host` → "Upload a quiz"):
+CSV/TSV spreadsheets and JSON are parsed directly, plain text and PDFs are
+run through the same LLM backend to extract questions and answers. It lands
+as a draft like a generated quiz. See `docs/quiz-upload.md` for the accepted
+formats.
+
+Question prompts and the between-question quote are rendered as **HTML**
+(allowlist-sanitized in `src/lib/richText.ts` — inline formatting, lists and
+`<br>`, nothing that can carry a script), so a host can put line breaks and
+emphasis into a question or a quote and have it lay out on the projected
+screen.
+
 This app owns its own `quizzes`/`questions` Firestore collections — a
 generated quiz is saved as a draft, previewed, and Published before it can be
 turned into a live session. `/host` and all of `/api/quizzes/*` (which now

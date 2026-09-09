@@ -147,6 +147,8 @@ CI, etc.), see the `clean-codebase` skill (`.claude/skills/clean-codebase/SKILL.
   it.
 - `docs/topic-scoped-grounding.md` — how topic selection narrows the grounding text handed to quiz
   generation (`src/data/courseTopicText.json`), and how to extend the index for a new week.
+- `docs/quiz-upload.md` — the `/host` "Upload a quiz" flow: `POST /api/quizzes/upload`, the
+  CSV/TSV/JSON/text/PDF parsers in `src/lib/quizImport.ts`, and the LLM fallback for prose.
 - `docs/self-hosted-llm.md` — the `LLM_BACKEND` switch (self-hosted `local` default vs opt-in
   `openrouter`), every `LLM_*` env var, and the exact steps to flip it for local dev and Cloud Run.
 - `load-test/README.md` — k6-based load testing for the 500-1000-player worst case.

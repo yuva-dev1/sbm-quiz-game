@@ -17,6 +17,7 @@ import { measureLatency } from "@/lib/latency";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_TILE_COLORS } from "@/lib/answerShapes";
 import { QuoteOverlay } from "@/components/QuoteOverlay";
+import { RichText } from "@/components/RichText";
 import { savePlayerSession } from "@/lib/playerSession";
 import { Confetti } from "@/components/Confetti";
 
@@ -319,7 +320,7 @@ export function PlayerLobby({
             {remaining}
           </p>
         )}
-        <h1 className="max-w-md text-2xl break-words lg:max-w-xl">{question.question}</h1>
+        <RichText as="h1" className="max-w-md text-2xl break-words lg:max-w-xl" html={question.question} />
         {/* Both the "Get Ready" countdown and the post-reveal status pill are
             always mounted, stacked in the same grid cell, and toggled via
             visibility — never conditionally mounted — so the cell's height

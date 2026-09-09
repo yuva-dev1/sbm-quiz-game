@@ -5,7 +5,12 @@
  * screens both render this off the same `quote_display` broadcast, so
  * everyone sees the same quote at the same time. Stays up until the host
  * clicks "Next" — there's no auto-advance timer.
+ *
+ * `quote` and `attribution` are rendered as (sanitized) HTML so a quote can
+ * carry `<br/>`, emphasis, or Tamil/Sanskrit markup and still lay out right.
  */
+import { RichText } from "@/components/RichText";
+
 export function QuoteOverlay({
   quote,
   attribution,
@@ -22,9 +27,11 @@ export function QuoteOverlay({
       <div className="flex max-w-xl flex-col items-center gap-5 text-center animate-[rise_0.5s_ease]">
         <span className="text-3xl text-gold">🪷</span>
         <p className="whitespace-pre-line font-serif text-2xl leading-snug text-white sm:text-3xl">
-          &ldquo;{quote}&rdquo;
+          &ldquo;<RichText html={quote} />&rdquo;
         </p>
-        <p className="text-xs font-semibold tracking-wide text-gold-soft uppercase">— {attribution}</p>
+        <p className="text-xs font-semibold tracking-wide text-gold-soft uppercase">
+          — <RichText html={attribution} />
+        </p>
         {onNext && (
           <button type="button" onClick={onNext} className="btn btn-secondary mt-2">
             Next

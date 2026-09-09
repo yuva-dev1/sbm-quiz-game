@@ -182,11 +182,12 @@ export function PlayerLobby({
 
   // Story 5.2: fetch our own rank once a question locks — a plain
   // authenticated GET is as private as this needs to be (see the rank
-  // route's own comment for why this beats a per-player realtime channel). This
-  // still backs the mid-question "Your rank" line further down — it's a
-  // separate feature from the end-of-game screen, which no longer shows rank.
+  // route's own comment for why this beats a per-player realtime channel).
+  // Backs both the mid-question "Your rank" line and the end-of-game "Your
+  // score" panel; the podium refetch guards against a late joiner (or a
+  // missed lock fetch) landing on the final screen with no score.
   useEffect(() => {
-    if (!locked) return;
+    if (!locked && !podium) return;
     let cancelled = false;
     fetch(`/api/sessions/${pin}/rank?playerId=${playerId}`)
       .then((res) => res.json())
@@ -197,7 +198,7 @@ export function PlayerLobby({
     return () => {
       cancelled = true;
     };
-  }, [locked, pin, playerId]);
+  }, [locked, podium, pin, playerId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,6 +268,25 @@ export function PlayerLobby({
         <Confetti />
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <h1 className="text-4xl">Game Over</h1>
+        {/* Each player's own final score — only when the host kept the
+            leaderboard on. With it off, the game ends without standings on
+            purpose, so this stays hidden. */}
+        {showLeaderboard && myRank && (
+          <div className="card flex flex-col items-center gap-2 px-8 py-6">
+            <p className="text-xs font-bold tracking-wide text-ink-soft uppercase">Your score</p>
+            <p className="font-serif text-6xl font-bold text-brand">{myRank.points}</p>
+            {myRank.totalPlayers > 0 && (
+              <p className="pill-badge">
+                {MEDALS[myRank.rank - 1] ?? `#${myRank.rank}`} of {myRank.totalPlayers}
+              </p>
+            )}
+            {myRank.answeredCount > 0 && (
+              <p className="text-sm text-ink-soft">
+                {myRank.correctCount} of {myRank.answeredCount} correct
+              </p>
+            )}
+          </div>
+        )}
         <p className="font-serif text-2xl text-brand-ink">Thank you for playing! Radhe Radhe!</p>
       </div>
     );

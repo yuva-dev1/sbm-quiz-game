@@ -1,5 +1,6 @@
 import { firestore } from "@/lib/firestore";
 import { GenerateQuizForm } from "./GenerateQuizForm";
+import { UploadQuizForm } from "./UploadQuizForm";
 import { QuizDraftCard } from "./QuizDraftCard";
 import { PublishedQuizCard } from "./PublishedQuizCard";
 import { getCourseCatalog, toPublicCourseWeeks } from "@/lib/courseCatalog";
@@ -98,6 +99,8 @@ export default async function HostPage() {
       </div>
 
       <GenerateQuizForm weeks={toPublicCourseWeeks(catalog)} />
+
+      <UploadQuizForm />
 
       {drafts.length > 0 && (
         <div>

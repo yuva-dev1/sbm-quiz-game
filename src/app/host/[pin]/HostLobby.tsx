@@ -21,6 +21,7 @@ import { retryLobbyMusicIfPaused, startLobbyMusic, stopLobbyMusic } from "@/lib/
 import { startQuestionMusic, stopQuestionMusic } from "@/lib/questionMusic";
 import { isSoundEnabled, useSoundSettings } from "@/lib/soundSettings";
 import { QuoteOverlay } from "@/components/QuoteOverlay";
+import { RichText } from "@/components/RichText";
 import { Confetti } from "@/components/Confetti";
 import { SoundSettingsMenu } from "@/components/SoundSettingsMenu";
 
@@ -423,7 +424,7 @@ export function HostLobby({
             <SoundSettingsMenu />
           </div>
         </div>
-        <h1 className="max-w-2xl text-4xl break-words lg:max-w-4xl">{question.question}</h1>
+        <RichText as="h1" className="max-w-2xl text-4xl break-words lg:max-w-4xl" html={question.question} />
         {!optionsVisible ? (
           <div className="flex flex-col items-center gap-2">
             <p className="text-xs font-bold tracking-wide text-ink-soft uppercase">Get Ready</p>

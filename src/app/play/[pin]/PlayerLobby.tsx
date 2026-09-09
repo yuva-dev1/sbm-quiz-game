@@ -360,19 +360,24 @@ export function PlayerLobby({
             // (Show what the player selected when the question locks: ✓ on
             // the correct tile, ✗ on their own wrong pick).
             const isMyWrongPick = isRevealed && mySelected && !isCorrectChoice;
+            // Once the answer is in (submitted, or the question locked), the
+            // tiles the player DIDN'T pick recede — dimmed and blurred — so
+            // only their actual picks stand out while they wait for the
+            // reveal. This is the main "which did I choose?" signal for
+            // multi-select, where nothing is dimmed while you're still
+            // tapping (you might pick more).
             const dimClass = isRevealed
               ? isCorrectChoice || isMyWrongPick
                 ? ""
                 : "opacity-30"
               : disabled && !mySelected
-                ? "opacity-40"
+                ? "opacity-30 blur-[2px]"
                 : "";
             // Pre-lock "you picked this" affordance — a bright gold halo
-            // (never red/green: those are reserved for the reveal below).
-            // Multi-select tiles are NOT dimmed while you're still choosing,
-            // so this ring is the only signal of which tiles you picked
-            // until the answer locks — a plain white ring was too faint
-            // against the tile colours to read at a glance (QA feedback).
+            // (never red/green: those are reserved for the reveal below) plus
+            // a slight scale-up, so a picked tile pops against the blurred
+            // ones. Also the only marker while a multi-select answer is still
+            // being tapped, before anything is dimmed.
             const selectedPreLockClass = mySelected && !isRevealed
               ? "ring-4 ring-gold ring-offset-2 ring-offset-paper scale-105"
               : "";

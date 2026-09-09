@@ -100,7 +100,7 @@ export default function TakeQuiz() {
     );
   }
 
-  const { firstName, bestPercentage, lastPercentage, attemptCount, version, liveVersion, week } = state.data;
+  const { firstName, bestPercentage, attemptCount, version, liveVersion, week } = state.data;
   const viewingOldVersion = preview && version != null && liveVersion != null && version !== liveVersion;
 
   const submit = async () => {
@@ -152,10 +152,8 @@ export default function TakeQuiz() {
       )}
       {!result && attemptCount > 0 && (
         <p className="muted" style={{ marginTop: 4 }}>
-          You&rsquo;ve taken this quiz {attemptCount} time{attemptCount === 1 ? '' : 's'}. Best{' '}
-          {bestPercentage}%
-          {lastPercentage != null && lastPercentage !== bestPercentage ? `, last ${lastPercentage}%` : ''}.
-          {week.open ? ' You can retake it below.' : ''}
+          {week.open ? `Attempt ${attemptCount + 1}` : `${attemptCount} attempt${attemptCount === 1 ? '' : 's'}`}
+          {' · '}Best {bestPercentage}%
         </p>
       )}
 

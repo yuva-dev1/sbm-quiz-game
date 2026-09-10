@@ -6,6 +6,12 @@ import { toPublicQuestion } from "@/lib/questions";
 import { sessionBroadcastRef } from "@/lib/sessionBroadcast";
 import type { LeaderboardEntry, QuestionStartPayload } from "@/lib/events";
 
+/** The player's own final standing, seeded from Firestore so the Game Over
+ * "Your score" card doesn't depend on a live Redis round trip that can miss
+ * (late joiner, evicted key). Shape matches PlayerLobby's MyRank; the
+ * correct/answered counts are filled in client-side. */
+type InitialMyRank = { rank: number; points: number; totalPlayers: number };
+
 export const dynamic = "force-dynamic";
 
 // Plain (non-component) helper so this request-time Date.now() read doesn't
@@ -98,6 +104,22 @@ export default async function PlayPage({
         })
       : null;
 
+  let initialMyRank: InitialMyRank | null = null;
+  if (session.status === "COMPLETED") {
+    const [myResultSnap, resultsCountSnap] = await Promise.all([
+      sessionRef.collection("results").doc(playerId).get(),
+      sessionRef.collection("results").count().get(),
+    ]);
+    const myResult = myResultSnap.data();
+    if (myResult) {
+      initialMyRank = {
+        rank: myResult.rank as number,
+        points: myResult.totalPoints as number,
+        totalPlayers: resultsCountSnap.data().count,
+      };
+    }
+  }
+
   return (
     <PlayerLobby
       pin={pin}
@@ -107,6 +129,7 @@ export default async function PlayPage({
       questionCount={questions.length}
       initialGameStarted={session.status === "ACTIVE"}
       initialPodium={initialPodium}
+      initialMyRank={initialMyRank}
       initialQuestion={initialQuestion}
       initialLocked={initialLocked}
       initialMyChoices={initialMyChoices}

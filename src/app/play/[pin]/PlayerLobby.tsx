@@ -34,6 +34,7 @@ export function PlayerLobby({
   questionCount,
   initialGameStarted,
   initialPodium,
+  initialMyRank,
   initialQuestion,
   initialLocked,
   initialMyChoices,
@@ -49,6 +50,7 @@ export function PlayerLobby({
   questionCount: number;
   initialGameStarted: boolean;
   initialPodium: LeaderboardEntry[] | null;
+  initialMyRank: { rank: number; points: number; totalPlayers: number } | null;
   initialQuestion: QuestionStartPayload | null;
   initialLocked: boolean;
   initialMyChoices: number[];
@@ -66,7 +68,12 @@ export function PlayerLobby({
   const [myChoices, setMyChoices] = useState<number[]>(initialMyChoices);
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [myRank, setMyRank] = useState<MyRank | null>(null);
+  // Seeded from the server for a finished game so the Game Over "Your
+  // score" card renders even if the client-side rank fetch below never
+  // resolves; that fetch still runs to fill in the correct/answered counts.
+  const [myRank, setMyRank] = useState<MyRank | null>(
+    initialMyRank ? { ...initialMyRank, correctCount: 0, answeredCount: 0 } : null
+  );
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
   const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
@@ -162,9 +169,31 @@ export function PlayerLobby({
         case SessionEvent.LeaderboardUpdate:
           setLeaderboard((data as LeaderboardUpdatePayload).leaderboard);
           break;
-        case SessionEvent.Podium:
-          setPodium((data as PodiumPayload).podium);
+        case SessionEvent.Podium: {
+          const payload = data as PodiumPayload;
+          setPodium(payload.podium);
+          // Trust the podium payload's leaderboard flag over local state:
+          // it's the persisted `session.showLeaderboard` read at finalize
+          // time, so it's right even if this client missed the
+          // settings_update when the host toggled the leaderboard on late
+          // in the game (which is exactly when the "Your score" card below
+          // needs it). Without this the card silently stays hidden.
+          setShowLeaderboard(payload.showLeaderboard);
+          // If we're on the podium, we can fill the "Your score" card
+          // straight from the broadcast — no wait on the rank fetch (which
+          // still runs to add the correct/answered counts).
+          const mine = payload.podium.find((entry) => entry.playerId === playerId);
+          if (mine) {
+            setMyRank((prev) => ({
+              rank: mine.rank,
+              points: mine.points,
+              totalPlayers: payload.totalPlayers,
+              correctCount: prev?.correctCount ?? 0,
+              answeredCount: prev?.answeredCount ?? 0,
+            }));
+          }
           break;
+        }
         case SessionEvent.SettingsUpdate:
           setShowLeaderboard((data as SettingsUpdatePayload).showLeaderboard);
           setShowTimer((data as SettingsUpdatePayload).showTimer);
@@ -174,7 +203,7 @@ export function PlayerLobby({
           break;
       }
     });
-  }, [pin, initialBroadcastSeq]);
+  }, [pin, initialBroadcastSeq, playerId]);
 
   // No auto-clear timer here — the quote stays up until the host reveals
   // the question, and the resulting question_start broadcast is what

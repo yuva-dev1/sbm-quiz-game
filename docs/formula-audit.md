@@ -10,11 +10,22 @@ substitute for periodically re-running it as the code changes.
 
 ```
 trueReactionTime = clamp(rawReactionTime - estimatedLatencyMs / 2, 0, timeLimit)
-points = correct ? round(1000 * (1 - (trueReactionTime / timeLimit) / 2)) : 0
+points = round(fullCreditPoints * correctFraction)
+  where fullCreditPoints = ACCURACY ? 1000 : 1000 * (1 - (trueReactionTime / timeLimit) / 2)
 ```
 
 Implementation: `src/lib/scoring.ts`. Deliberately pure functions with no
 I/O, so they can be tested in complete isolation from the DB/realtime/network.
+
+### `correctFraction` (single- and multi-select grading)
+
+- Single-select: 1 for the right choice, 0 for a wrong one.
+- Multi-select: **any incorrect pick scores the whole answer 0** — there is
+  no partial credit for a selection that includes a wrong option, even one
+  that also covers every correct choice (picking A,B,C,D when A,B,C is
+  right scores 0, not 2/3). A pick that is a strict subset of the correct
+  choices with nothing wrong earns `correctPicks / totalCorrectChoices`
+  (picking A,B out of A,B,C scores 2/3).
 
 ## Layer 1 — unit tests (`src/lib/scoring.test.ts`)
 

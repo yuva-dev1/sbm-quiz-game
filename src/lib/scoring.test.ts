@@ -112,18 +112,25 @@ describe("computeCorrectFraction", () => {
     expect(computeCorrectFraction(choices, ["A", "C"], [0, 2])).toBe(1);
   });
 
-  it("gives partial credit for picking only some of the correct choices", () => {
-    // 1 correct pick, 0 incorrect, out of 2 correct total -> (1-0)/2 = 0.5
+  it("gives pro-rata credit for picking only some of the correct choices and nothing wrong", () => {
+    // 1 correct pick, 0 incorrect, out of 2 correct total -> 1/2 = 0.5
     expect(computeCorrectFraction(choices, ["A", "C"], [0])).toBe(0.5);
+    // 2 correct picks, 0 incorrect, out of 3 correct total -> 2/3
+    expect(computeCorrectFraction(["A", "B", "C", "D"], ["A", "B", "C"], [0, 1])).toBeCloseTo(2 / 3);
   });
 
-  it("subtracts credit for incorrect picks alongside correct ones", () => {
-    // 1 correct (A), 1 incorrect (B), out of 2 correct total -> (1-1)/2 = 0
+  it("scores 0 when any incorrect choice is picked alongside correct ones", () => {
+    // 1 correct (A), 1 incorrect (B) -> any wrong pick zeroes the answer
     expect(computeCorrectFraction(choices, ["A", "C"], [0, 1])).toBe(0);
   });
 
-  it("clamps to 0 rather than going negative when incorrect picks outweigh correct ones", () => {
-    // 0 correct, 2 incorrect (B, D), out of 1 correct total -> (0-2)/1 = -2 -> clamp 0
+  it("scores 0 for every correct choice plus one wrong one (no partial credit for a superset)", () => {
+    // A,B,C are correct; picking A,B,C,D adds a wrong pick -> 0, not 2/3
+    expect(computeCorrectFraction(["A", "B", "C", "D"], ["A", "B", "C"], [0, 1, 2, 3])).toBe(0);
+  });
+
+  it("scores 0 when incorrect picks outweigh correct ones", () => {
+    // 0 correct, 2 incorrect (B, D) -> 0
     expect(computeCorrectFraction(choices, ["A"], [1, 3])).toBe(0);
   });
 });

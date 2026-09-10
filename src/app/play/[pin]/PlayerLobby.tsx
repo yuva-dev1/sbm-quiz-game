@@ -298,6 +298,11 @@ export function PlayerLobby({
     ).length;
     const isFullyCorrect =
       revealedAnswers !== null && correctPicks === revealedAnswers.length && myChoices.length === revealedAnswers.length;
+    // Any wrong pick scores the answer 0 (see computeCorrectFraction) — so a
+    // selection that includes one reads as "Incorrect", never a partial
+    // "n/m correct", even when it also covers some of the right choices.
+    const hasWrongPick =
+      revealedAnswers !== null && myChoices.some((i) => !revealedAnswers.includes(question.choices[i]));
 
     const postRevealStatus =
       myChoices.length > 0 && submitError ? (
@@ -305,7 +310,7 @@ export function PlayerLobby({
       ) : myChoices.length > 0 && locked && revealedAnswers !== null ? (
         isFullyCorrect ? (
           <p className="pill-badge bg-success-soft text-success">Correct! ✓</p>
-        ) : correctPicks > 0 ? (
+        ) : !hasWrongPick && correctPicks > 0 ? (
           <p className="pill-badge bg-success-soft text-success">
             {correctPicks}/{revealedAnswers.length} correct
           </p>

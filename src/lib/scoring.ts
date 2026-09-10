@@ -30,17 +30,22 @@ export type ScoringMode = "SPEED" | "ACCURACY";
 
 /**
  * Fraction of full credit earned for a set of selected choice indices
- * against a question's correct choices: (correctPicks - incorrectPicks) /
- * totalCorrectChoices, clamped to 0. For single-select questions (exactly
- * one correct choice, exactly one pick) this collapses to the original
- * all-or-nothing 1 or 0.
+ * against a question's correct choices. Any incorrect pick zeroes the
+ * answer outright — there is no partial credit for a selection that
+ * includes a wrong option, even one that also covers every correct choice
+ * (picking A,B,C,D when A,B,C is right scores 0, not 2/3). Otherwise it is
+ * correctPicks / totalCorrectChoices, so an incomplete but strictly
+ * correct subset still earns pro-rata credit (picking A,B out of A,B,C
+ * scores 2/3). For single-select questions (exactly one correct choice,
+ * exactly one pick) this collapses to the original all-or-nothing 1 or 0.
  */
 export function computeCorrectFraction(choices: string[], correctChoices: string[], choiceIndices: number[]): number {
   const correctSet = new Set(correctChoices);
   const picked = choiceIndices.map((i) => choices[i]);
   const correctPicks = picked.filter((choice) => correctSet.has(choice)).length;
   const incorrectPicks = picked.length - correctPicks;
-  return Math.max(0, (correctPicks - incorrectPicks) / correctChoices.length);
+  if (incorrectPicks > 0) return 0;
+  return correctPicks / correctChoices.length;
 }
 
 /**
@@ -50,8 +55,9 @@ export function computeCorrectFraction(choices: string[], correctChoices: string
  * 0 (Story 4.3).
  *
  * `correctFraction` is 0..1 — 1/0 for a single-select question's
- * right/wrong answer, or a partial value for multi-select questions graded
- * on (correctPicks - incorrectPicks) / totalCorrectChoices. Points scale
+ * right/wrong answer, or a partial value for a multi-select answer that
+ * picked a strict subset of the correct choices and nothing wrong (see
+ * computeCorrectFraction; any wrong pick makes it 0). Points scale
  * linearly with it, on top of whatever the mode/speed curve would award a
  * fully correct answer.
  *

@@ -50,7 +50,13 @@ export function PlayerLobby({
   questionCount: number;
   initialGameStarted: boolean;
   initialPodium: LeaderboardEntry[] | null;
-  initialMyRank: { rank: number; points: number; totalPlayers: number } | null;
+  initialMyRank: {
+    rank: number;
+    points: number;
+    totalPlayers: number;
+    correctCount: number;
+    answeredCount: number;
+  } | null;
   initialQuestion: QuestionStartPayload | null;
   initialLocked: boolean;
   initialMyChoices: number[];
@@ -71,9 +77,7 @@ export function PlayerLobby({
   // Seeded from the server for a finished game so the Game Over "Your
   // score" card renders even if the client-side rank fetch below never
   // resolves; that fetch still runs to fill in the correct/answered counts.
-  const [myRank, setMyRank] = useState<MyRank | null>(
-    initialMyRank ? { ...initialMyRank, correctCount: 0, answeredCount: 0 } : null
-  );
+  const [myRank, setMyRank] = useState<MyRank | null>(initialMyRank);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
   const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
@@ -309,9 +313,9 @@ export function PlayerLobby({
                 {MEDALS[myRank.rank - 1] ?? `#${myRank.rank}`} of {myRank.totalPlayers}
               </p>
             )}
-            {myRank.answeredCount > 0 && (
+            {questionCount > 0 && (
               <p className="text-sm text-ink-soft">
-                {myRank.correctCount} of {myRank.answeredCount} correct
+                {myRank.correctCount} of {questionCount} correct
               </p>
             )}
           </div>

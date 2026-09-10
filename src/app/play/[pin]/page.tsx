@@ -7,10 +7,18 @@ import { sessionBroadcastRef } from "@/lib/sessionBroadcast";
 import type { LeaderboardEntry, QuestionStartPayload } from "@/lib/events";
 
 /** The player's own final standing, seeded from Firestore so the Game Over
- * "Your score" card doesn't depend on a live Redis round trip that can miss
- * (late joiner, evicted key). Shape matches PlayerLobby's MyRank; the
- * correct/answered counts are filled in client-side. */
-type InitialMyRank = { rank: number; points: number; totalPlayers: number };
+ * "Your score" card doesn't depend on a live round trip that can miss (a
+ * missed rank fetch, an evicted Redis key). `correctCount` is read straight
+ * from the player's frozen-question answer docs here rather than via the
+ * `/rank` route's collection-group count, which needs a composite index and
+ * otherwise fails silently. */
+type InitialMyRank = {
+  rank: number;
+  points: number;
+  totalPlayers: number;
+  correctCount: number;
+  answeredCount: number;
+};
 
 export const dynamic = "force-dynamic";
 
@@ -106,16 +114,20 @@ export default async function PlayPage({
 
   let initialMyRank: InitialMyRank | null = null;
   if (session.status === "COMPLETED") {
-    const [myResultSnap, resultsCountSnap] = await Promise.all([
+    const [myResultSnap, resultsCountSnap, myAnswerSnaps] = await Promise.all([
       sessionRef.collection("results").doc(playerId).get(),
       sessionRef.collection("results").count().get(),
+      Promise.all(questions.map((q) => q.ref.collection("answers").doc(playerId).get())),
     ]);
     const myResult = myResultSnap.data();
     if (myResult) {
+      const answered = myAnswerSnaps.filter((snap) => snap.exists);
       initialMyRank = {
         rank: myResult.rank as number,
         points: myResult.totalPoints as number,
         totalPlayers: resultsCountSnap.data().count,
+        correctCount: answered.filter((snap) => snap.data()!.correct === true).length,
+        answeredCount: answered.length,
       };
     }
   }

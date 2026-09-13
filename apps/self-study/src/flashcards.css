@@ -1,5 +1,5 @@
 .flashcard-app {
-  min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(circle at 8% 3%, rgba(255, 211, 74, .23), transparent 23rem),
     radial-gradient(circle at 95% 24%, rgba(104, 125, 224, .16), transparent 31rem),
@@ -78,7 +78,7 @@
 .flashcard-composer {
   position: sticky;
   top: 18px;
-  max-height: calc(100vh - 36px);
+  max-height: calc(100dvh - 36px);
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(46, 49, 146, .2) transparent;
@@ -109,8 +109,10 @@
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
-  transition: color .2s ease, background .2s ease, box-shadow .2s ease;
+  transition: color .2s ease, background .2s ease, box-shadow .2s ease, transform .15s ease;
 }
+
+.segmented-control button:active { transform: scale(.96); }
 
 .segmented-control button.selected {
   color: var(--brand);
@@ -154,6 +156,7 @@
 }
 
 .topic-chip-list button:hover { border-color: rgba(46, 49, 146, .35); }
+.topic-chip-list button:active { transform: scale(.95); }
 .topic-chip-list button.selected { border-color: var(--brand); color: white; background: var(--brand); box-shadow: 0 7px 16px rgba(46, 49, 146, .15); }
 
 .count-picker {
@@ -177,6 +180,7 @@
 }
 
 .count-picker button:hover { transform: translateY(-1px); border-color: rgba(46, 49, 146, .35); }
+.count-picker button:active { transform: translateY(0) scale(.95); }
 .count-picker button.selected { border-color: var(--brand); color: var(--gold); background: var(--brand); box-shadow: 0 8px 18px rgba(46, 49, 146, .18); }
 .count-helper { margin-top: 7px; color: var(--ink-soft); font-size: 11px; }
 .flashcard-generate { min-height: 50px; }
@@ -254,8 +258,9 @@
 }
 
 .deck-toolbar > div { display: flex; gap: 4px; }
-.deck-toolbar button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; border: 0; border-radius: 8px; color: var(--brand); background: transparent; cursor: pointer; font-size: 11px; font-weight: 800; }
+.deck-toolbar button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; border: 0; border-radius: 8px; color: var(--brand); background: transparent; cursor: pointer; font-size: 11px; font-weight: 800; transition: .15s ease; }
 .deck-toolbar button:hover:not(:disabled) { background: rgba(46, 49, 146, .06); }
+.deck-toolbar button:active:not(:disabled) { transform: scale(.94); }
 .deck-toolbar button:disabled { opacity: .5; }
 
 .study-stage {
@@ -274,7 +279,10 @@
   background: transparent;
   cursor: pointer;
   perspective: 1600px;
+  transition: transform .15s ease;
 }
+
+.study-card:active { transform: scale(.99); }
 
 .study-card::before,
 .study-card::after {
@@ -402,9 +410,11 @@
   background: white;
   cursor: pointer;
   box-shadow: 0 7px 16px rgba(36, 40, 122, .05);
+  transition: .15s ease;
 }
 
 .answer-actions > button:hover { border-color: rgba(46, 49, 146, .32); background: rgba(46, 49, 146, .045); }
+.answer-actions > button:active { transform: scale(.95); }
 .edited-answer-badge { padding: 7px 10px; border-radius: 999px; color: #7b6112; background: rgba(246, 198, 74, .17); }
 
 .answer-editor {
@@ -434,10 +444,13 @@
 .answer-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 11px; }
 .answer-editor-footer p { max-width: 360px; color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
 .answer-editor-footer > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.answer-editor-footer button { min-height: 36px; display: inline-flex; align-items: center; gap: 5px; padding: 8px 11px; border: 0; border-radius: 9px; cursor: pointer; font-size: 10px; font-weight: 850; }
+.answer-editor-footer button { min-height: 36px; display: inline-flex; align-items: center; gap: 5px; padding: 8px 11px; border: 0; border-radius: 9px; cursor: pointer; font-size: 10px; font-weight: 850; transition: .15s ease; }
 .answer-editor-footer button:disabled { opacity: .45; cursor: not-allowed; }
+.answer-editor-footer button:active:not(:disabled) { transform: scale(.95); }
 .restore-answer, .cancel-answer { color: var(--brand); background: rgba(46, 49, 146, .06); }
+.restore-answer:hover:not(:disabled), .cancel-answer:hover:not(:disabled) { background: rgba(46, 49, 146, .11); }
 .save-answer { color: white; background: var(--brand); }
+.save-answer:hover:not(:disabled) { background: var(--brand-deep); }
 
 .deck-navigation {
   display: grid;
@@ -462,6 +475,7 @@
 }
 
 .deck-navigation > button:hover:not(:disabled) { transform: translateY(-2px); border-color: rgba(46, 49, 146, .3); }
+.deck-navigation > button:active:not(:disabled) { transform: translateY(0) scale(.93); }
 .deck-navigation > button:disabled { opacity: .35; cursor: not-allowed; }
 .progress-track { height: 5px; overflow: hidden; border-radius: 999px; background: rgba(46, 49, 146, .09); }
 .progress-track span { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, var(--brand), #686fd0); transition: width .28s ease; }
@@ -494,6 +508,7 @@
 .card-strip button span { font: 700 16px/1 'Cormorant Garamond', Georgia, serif; }
 .card-strip button small { color: var(--ink-soft); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .card-strip button:hover { border-color: rgba(46, 49, 146, .32); }
+.card-strip button:active { transform: scale(.93); }
 .card-strip button.active { border-color: var(--brand); color: white; background: var(--brand); box-shadow: 0 8px 16px rgba(46, 49, 146, .16); }
 .card-strip button.active small { color: var(--gold); }
 

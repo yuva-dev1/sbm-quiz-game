@@ -39,6 +39,14 @@ function formatGenerationProgress(progress) {
   return 'Double-checking against the source material...';
 }
 
+// See main.jsx's copy of this function — same rough-progress-band idea.
+function generationPercent(progress) {
+  if (!progress) return 6;
+  if (progress.phase === 'draft') return progress.total ? Math.max(8, Math.round((progress.completed / progress.total) * 70)) : 20;
+  if (progress.phase === 'repairing') return 85;
+  return 94;
+}
+
 const CARD_COUNTS = [5, 8, 10, 15, 20, 25, 30];
 const FALLBACK_CATALOG = {
   weeks: [
@@ -226,7 +234,12 @@ function WeekAndTopicForm({
       <button className="primary-button generate-button flashcard-generate" type="button" onClick={onGenerate} disabled={isGenerating || !selectedWeekIds.length}>
         {isGenerating ? <><LoaderCircle className="spin" size={18} /> {formatGenerationProgress(generationProgress)}</> : <><Sparkles size={18} /> Generate flashcards <ArrowRight size={17} /></>}
       </button>
-      {isGenerating && <p className="generation-timing" role="status">Larger decks can take a few minutes — this stays open while it works.</p>}
+      {isGenerating && (
+        <>
+          <div className="generation-track"><span style={{ width: `${generationPercent(generationProgress)}%` }} /></div>
+          <p className="generation-timing" role="status">Larger decks can take a few minutes — this stays open while it works.</p>
+        </>
+      )}
       <p className="source-helper"><BookOpen size={14} /> Grounded in the indexed class notes for the selected week{selectedWeekIds.length > 1 ? 's' : ''}.</p>
     </section>
   );
@@ -595,6 +608,7 @@ export default function FlashcardsApp({ mode = 'flashcards', onModeChange = () =
 
   return (
     <div className="app-shell flashcard-app">
+      <a className="skip-link" href="#flashcard-studio">Skip to content</a>
       <SelfStudyHeader
         mode={mode}
         onModeChange={onModeChange}

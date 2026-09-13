@@ -15,7 +15,6 @@ import {
   PencilLine,
   Play,
   RotateCcw,
-  Send,
   Sparkles,
   X
 } from 'lucide-react';
@@ -172,6 +171,16 @@ function formatGenerationProgress(progress) {
   return 'Double-checking against the source material...';
 }
 
+// A rough sense of "how far along", not a literal fraction — repair/verify
+// phases don't report counts (see formatGenerationProgress above), so this
+// just settles into a later band once drafting finishes.
+function generationPercent(progress) {
+  if (!progress) return 6;
+  if (progress.phase === 'draft') return progress.total ? Math.max(8, Math.round((progress.completed / progress.total) * 70)) : 20;
+  if (progress.phase === 'repairing') return 85;
+  return 94;
+}
+
 function QuizForm({ weeks, coverageMode, setCoverageMode, selectedWeekIds, setSelectedWeekIds, selectedTopic, setSelectedTopic, questionCount, setQuestionCount, difficulty, setDifficulty, onGenerate, isGenerating, generationProgress }) {
   const selectedWeeks = weeks.filter((week) => selectedWeekIds.includes(week.id));
   const selectedWeek = selectedWeeks[0] || weeks[0];
@@ -292,7 +301,12 @@ function QuizForm({ weeks, coverageMode, setCoverageMode, selectedWeekIds, setSe
       <button className="primary-button generate-button" type="button" onClick={onGenerate} disabled={isGenerating || selectedWeekIds.length === 0 || !selectedTopic}>
         {isGenerating ? <><LoaderCircle className="spin" size={18} /> {formatGenerationProgress(generationProgress)}</> : <><Sparkles size={18} /> Generate quiz <ArrowRight size={17} /></>}
       </button>
-      {isGenerating && <p className="generation-timing" role="status">Grounded generation can take a couple of minutes — this stays open while it works.</p>}
+      {isGenerating && (
+        <>
+          <div className="generation-track"><span style={{ width: `${generationPercent(generationProgress)}%` }} /></div>
+          <p className="generation-timing" role="status">Grounded generation can take a couple of minutes — this stays open while it works.</p>
+        </>
+      )}
     </section>
   );
 }
@@ -711,6 +725,7 @@ function App({ mode = 'quiz', onModeChange = () => {}, regNo, onLogout }) {
 
   return (
     <div className="app-shell quiz-app">
+      <a className="skip-link" href="#studio">Skip to content</a>
       <SelfStudyHeader
         mode={mode}
         onModeChange={onModeChange}
@@ -743,7 +758,7 @@ function App({ mode = 'quiz', onModeChange = () => {}, regNo, onLogout }) {
 
         <section id="how-it-works" className="how-section"><div className="how-copy"><p className="eyebrow gold">03 · Keep the rhythm</p><h2>Designed for the five minutes before class begins.</h2><p>Choose one week or combine several, narrow to a topic, and let the backend use the matching notes as context.</p></div><div className="how-steps"><div><span>01</span><strong>Choose the weeks</strong><p>Start with one or combine Week 1 through Week 5 from the class material.</p></div><div><span>02</span><strong>Narrow the topic</strong><p>Pick one of the extracted topics or keep all topics in the selected weeks in scope.</p></div><div><span>03</span><strong>Submit and review</strong><p>Answer the quiz, submit it, and see your score plus the questions worth revisiting.</p></div></div></section>
       </main>
-      <footer className="site-footer"><div className="footer-inner"><div><Logo /><p>One place for thoughtful Bhagavatam review.</p></div><div className="footer-right"><span>Quiz mode</span><span className="footer-rule" /><a href="mailto:hello@example.com">Questions or ideas? <strong>Let us know</strong> <Send size={14} /></a></div></div></footer>
+      <footer className="site-footer"><div className="footer-inner"><div><Logo /><p>One place for thoughtful Bhagavatam review.</p></div><div className="footer-right"><span>Quiz mode</span></div></div></footer>
     </div>
   );
 }

@@ -111,7 +111,7 @@ function normalizeCards(result) {
 function Logo() {
   return (
     <a className="brand" href="#top" aria-label="Bhagavatam Self Study home">
-      <span className="brand-logo-art"><img src={OFFICIAL_GOD_LOGO_URL} alt="Global Organization for Divinity" /></span>
+      <span className="brand-logo-art footer-brand-logo" aria-hidden="true"><img src={OFFICIAL_GOD_LOGO_URL} alt="" /></span>
       <span className="brand-copy">
         <strong>Bhagavatam Self Study</strong>
         <em>Atlanta Namadwaar · Class Tools</em>
@@ -464,7 +464,7 @@ function DeckViewer({ cards, contextLabel, onRegenerate, isGenerating, onSave, s
 }
 
 function FlashcardSetsPanel({ sets, isLoading, error, onOpenSet }) {
-  if (isLoading) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2>Loading your saved sets...</h2></div>;
+  if (isLoading) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2><LoaderCircle className="spin" size={26} style={{ verticalAlign: '-3px', marginRight: 10 }} /> Loading your saved sets...</h2></div>;
   if (error) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2>Couldn&apos;t load your sets</h2><p>{error}</p></div>;
   if (!sets.length) return <div className="empty-deck"><p className="eyebrow gold">Your flashcards</p><h2>No saved sets yet</h2><p>Generate a deck and tap &quot;Save this set&quot; to see it here.</p></div>;
 

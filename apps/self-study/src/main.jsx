@@ -141,10 +141,6 @@ const demoQuestions = [
   }
 ];
 
-function IconButton({ label, children, onClick, className = '' }) {
-  return <button className={`icon-button ${className}`} aria-label={label} title={label} onClick={onClick}>{children}</button>;
-}
-
 function StepRail({ activeStep }) {
   return (
     <div className="step-rail" aria-label={`Step ${activeStep} of 3`}>
@@ -512,7 +508,7 @@ function QuizHistoryPanel({ attempts, isLoading, error, onOpenAttempt }) {
   if (isLoading) {
     return (
       <section className="preview-panel" aria-labelledby="history-title">
-        <div className="preview-header"><div><p className="eyebrow gold">Your history</p><h2 id="history-title">Loading your past quizzes...</h2></div></div>
+        <div className="preview-header"><div><p className="eyebrow gold">Your history</p><h2 id="history-title"><LoaderCircle className="spin" size={26} style={{ verticalAlign: '-3px', marginRight: 10 }} /> Loading your past quizzes...</h2></div></div>
       </section>
     );
   }
@@ -526,8 +522,9 @@ function QuizHistoryPanel({ attempts, isLoading, error, onOpenAttempt }) {
   }
   if (!attempts.length) {
     return (
-      <section className="preview-panel" aria-labelledby="history-title">
-        <div className="preview-header"><div><p className="eyebrow gold">Your history</p><h2 id="history-title">No quizzes taken yet</h2></div></div>
+      <section className="preview-panel history-empty" aria-labelledby="history-title">
+        <div className="history-empty-icon"><History size={26} /></div>
+        <h2 id="history-title">No quizzes taken yet</h2>
         <p>Submit a quiz and it&apos;ll show up here.</p>
       </section>
     );

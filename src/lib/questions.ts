@@ -312,7 +312,19 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
   const rawReactionTimeMs = computeRawReactionTimeMs(serverReceivedAt.getTime(), revealAt.getTime());
   const trueReactionTimeMs = computeTrueReactionTimeMs(rawReactionTimeMs, estimatedLatencyMs, timeLimitMs);
   const correctFraction = computeCorrectFraction(current.choices, current.correctChoices, choiceIndices);
-  const correct = correctFraction >= 1;
+  // Any nonzero fraction is "correct" for tallying purposes (correctCount/
+  // incorrectCount, the live class-wide breakdown, and the end-of-game "X of
+  // Y correct" summary) — this mirrors the player's own post-reveal pill
+  // (PlayerLobby.tsx), which shows the same green "success" styling for a
+  // strict-subset multi-select pick (partial credit, no wrong picks) as for
+  // a fully correct one, and reserves red "Incorrect" for a wrong pick
+  // (fraction === 0). Using `>= 1` here made every partial-credit
+  // multi-select answer count as incorrect despite scoring points, so a
+  // player who never picked a question's complete correct set could earn
+  // real points all game and still see "0 of N correct" at the end. A
+  // single-select question's fraction is always exactly 0 or 1, so this is
+  // a no-op there.
+  const correct = correctFraction > 0;
   const points = computePoints(correctFraction, trueReactionTimeMs, timeLimitMs, session.scoringMode);
 
   const answerRef = current.ref.collection("answers").doc(playerId);

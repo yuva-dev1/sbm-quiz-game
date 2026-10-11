@@ -1,19 +1,66 @@
 rules_version = '2';
 
-// Almost everything is server-only: the firebase-admin SDK (see
-// src/lib/firestore.ts) bypasses these rules entirely, matching how
-// Prisma/Postgres access worked before this migration. The two exceptions
-// below are the live realtime path — the browser reads them directly with a
-// Firestore listener (src/lib/sessionBroadcastClient.ts), replacing the old
-// Ably subscription. Both hold only data that was already delivered to any
-// client holding the game PIN under Ably (sanitized event payloads; player
-// nicknames), so public read is not a widening of exposure. All writes stay
-// server-only (deny here; the Admin SDK ignores rules).
+// This Firebase project (namabiksha-v1) is SHARED between apps: the legacy
+// Android/iOS/namaYagna collections below, and the live quiz game at the
+// bottom. `firebase deploy --only firestore:rules` REPLACES the whole ruleset,
+// so ALWAYS deploy this merged file. Deploying any one app's rules in
+// isolation silently breaks the others (on 2026-10-07 the legacy rules were
+// deployed alone, which denied the quiz's browser listeners and stopped
+// players/game-state from appearing on the host screen).
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---- Legacy mobile apps (do not modify without their owners) ----------
+
+    // For Android Documents
+    match /android/{androidDocs} {
+      allow read: if request.auth.uid == resource.id || request.auth.uid == "az8dpktAOLU908EVPPiyQ9UE4yl1";
+      allow update: if request.auth.uid == "az8dpktAOLU908EVPPiyQ9UE4yl1"
+      //allow read, update: if (request.auth.uid == resource.id && (...long blocklist of uids elided; see git history of the live ruleset...) )  || request.auth.uid == "az8dpktAOLU908EVPPiyQ9UE4yl1";
+      allow delete: if request.auth.uid == resource.id;
+      allow create: if request.auth.uid != null;
+    }
+
+    // For iOS Documents
+    match /iOS/{iOSDocs} {
+      allow read, update: if request.auth.uid == resource.id || request.auth.uid == "az8dpktAOLU908EVPPiyQ9UE4yl1";
+      allow delete: if request.auth.uid == resource.id ;
+      allow create: if request.auth.uid != null;
+    }
+
+    match /androidNew/{androidNewDocs} {
+      allow read, update: if request.auth.uid == resource.id || request.auth.uid == "az8dpktAOLU908EVPPiyQ9UE4yl1";
+      allow delete: if request.auth.uid == resource.id ;
+      allow create: if request.auth.uid != null;
+    }
+
+    match /devCollection/{devDocs} {
+      allow read, update: if request.auth.uid == resource.id || request.auth.uid == "az8dpktAOLU908EVPPiyQ9UE4yl1";
+      allow delete: if request.auth.uid == resource.id ;
+      allow create: if request.auth.uid != null;
+    }
+
+    match /namaYagna/{namaYagnaDocs} {
+      allow read, update: if request.auth.uid == resource.id || request.auth.uid == "az8dpktAOLU908EVPPiyQ9UE4yl1";
+      allow delete: if request.auth.uid == resource.id ;
+      allow create: if request.auth.uid != null;
+    }
+
+    // For commonField Documents
+    match /commonFields/{commonFieldsDocs} {
+      allow read: if request.auth.uid != null;
+    }
+
+    // ---- sbm-quiz-game (live quiz realtime path) --------------------------
+    // Everything else the quiz stores is server-only (the firebase-admin SDK
+    // bypasses rules; default-deny covers the rest). These two blocks hold only
+    // data already shown on screen to anyone with the game PIN: sanitized
+    // broadcast events and player nicknames. All writes stay server-only.
+
     // Per-session broadcast event log — the question_start / question_locked
-    // / leaderboard_update / ... stream every player and the host tail.
+    // / leaderboard_update / ... stream every player and the host tail
+    // (src/lib/sessionBroadcastClient.ts).
     match /sessionBroadcasts/{pin} {
       allow read: if true;
       allow write: if false;
@@ -25,15 +72,9 @@ service cloud.firestore {
     }
 
     // The host lobby's live roster listens straight to this subcollection.
-    // Player docs carry nickname / estimatedLatencyMs / joinedAt — nothing
-    // that isn't already shown on screen to everyone in the room.
     match /gameSessions/{sessionId}/players/{playerId} {
       allow read: if true;
       allow write: if false;
-    }
-
-    match /{document=**} {
-      allow read, write: if false;
     }
   }
 }

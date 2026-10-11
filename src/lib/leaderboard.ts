@@ -61,11 +61,10 @@ async function findSessionByPin(pin: string) {
 /** How many of the player's answers this session were correct, out of how
  * many they've answered so far — the "X/Y correct" summary shown alongside
  * rank (Story: show right/total regardless of whether the leaderboard is on).
- * Answer docs live at gameSessions/{id}/questions/{qid}/answers/{playerId} —
- * gameSessionId and playerId are denormalized fields on each Answer doc
- * (see submitAnswer in questions.ts) specifically so this collection-group
- * query can scope across every question in the session without needing the
- * per-question doc IDs. */
+ * Reads the player's own answer doc under each frozen session question
+ * (answers/{playerId}) directly, so it needs no composite index — the earlier
+ * collection-group count query failed whenever that index wasn't deployed,
+ * leaving players with a bogus "0 of N correct" next to a real score. */
 export async function getPlayerProgress(
   pin: string,
   playerId: string
@@ -73,17 +72,13 @@ export async function getPlayerProgress(
   const sessionDoc = await findSessionByPin(pin);
   if (!sessionDoc) return null;
 
-  const answersGroup = firestore.collectionGroup("answers");
-  const [correctSnap, answeredSnap] = await Promise.all([
-    answersGroup
-      .where("gameSessionId", "==", sessionDoc.id)
-      .where("playerId", "==", playerId)
-      .where("correct", "==", true)
-      .count()
-      .get(),
-    answersGroup.where("gameSessionId", "==", sessionDoc.id).where("playerId", "==", playerId).count().get(),
-  ]);
-  return { correctCount: correctSnap.data().count, answeredCount: answeredSnap.data().count };
+  const questionsSnap = await sessionDoc.ref.collection("sessionQuestions").get();
+  const answerSnaps = await Promise.all(questionsSnap.docs.map((q) => q.ref.collection("answers").doc(playerId).get()));
+  const answered = answerSnaps.filter((snap) => snap.exists);
+  return {
+    correctCount: answered.filter((snap) => snap.data()!.correct === true).length,
+    answeredCount: answered.length,
+  };
 }
 
 async function withNicknames(entries: LeaderboardEntry[], sessionId: string) {

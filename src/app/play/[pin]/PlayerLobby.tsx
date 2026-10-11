@@ -223,9 +223,10 @@ export function PlayerLobby({
     if (!locked && !podium) return;
     let cancelled = false;
     fetch(`/api/sessions/${pin}/rank?playerId=${playerId}`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled && data.rank !== null) setMyRank(data);
+        // Ignore failed/empty responses so they can't clobber the seeded score.
+        if (!cancelled && data && typeof data.rank === "number") setMyRank(data);
       })
       .catch(() => {});
     return () => {
